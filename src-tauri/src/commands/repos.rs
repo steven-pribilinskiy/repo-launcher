@@ -14,6 +14,12 @@ pub struct Repo {
     pub path: String,
     #[serde(default)]
     pub distro: String,
+    /// Times this path appears in goto-repo history.
+    #[serde(default)]
+    pub uses: u64,
+    /// Most-recent history timestamp (unix seconds), 0 if never.
+    #[serde(default)]
+    pub last_used: u64,
 }
 
 /// Detect installed WSL distros via `wsl --list --quiet`.

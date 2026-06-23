@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Settings as SettingsIcon } from "lucide-react";
+import { List as ListIcon, Settings as SettingsIcon, Table2 } from "lucide-react";
 import { SORT_LABELS } from "@/types";
 import type { ActionDef } from "@/types";
 
@@ -10,6 +10,8 @@ type ActionBarProps = {
   onOpenSettings: () => void;
   repoCount: number;
   sortMode: number;
+  view: "list" | "table";
+  onToggleView: () => void;
 };
 
 function Kbd({ children }: { children: ReactNode }) {
@@ -35,6 +37,8 @@ export function ActionBar({
   onOpenSettings,
   repoCount,
   sortMode,
+  view,
+  onToggleView,
 }: ActionBarProps) {
   const enabled = actions.filter((action) => action.enabled);
 
@@ -61,6 +65,14 @@ export function ActionBar({
       </div>
       <div data-tauri-drag-region className="flex items-center justify-end gap-3">
         <span className="text-[11px] text-zinc-400 dark:text-zinc-600">{repoCount} repos</span>
+        <button
+          type="button"
+          onClick={onToggleView}
+          title={view === "list" ? "Table view" : "List view"}
+          className="rounded p-1 text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-600 dark:text-zinc-500 dark:hover:bg-zinc-700/60 dark:hover:text-zinc-300"
+        >
+          {view === "list" ? <Table2 className="h-3.5 w-3.5" /> : <ListIcon className="h-3.5 w-3.5" />}
+        </button>
         <button
           type="button"
           onClick={onCycleSort}

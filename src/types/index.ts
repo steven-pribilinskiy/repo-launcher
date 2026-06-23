@@ -3,6 +3,8 @@ export type Repo = {
   kind: string;
   path: string;
   distro: string;
+  uses: number;
+  last_used: number;
 };
 
 export type ActionKind = "clipboard" | "exec";

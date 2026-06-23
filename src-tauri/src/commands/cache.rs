@@ -128,6 +128,8 @@ fn parse_cache(content: &str, distro: &str) -> Vec<Repo> {
                     kind,
                     path,
                     distro: distro.to_string(),
+                    uses: 0,
+                    last_used: 0,
                 })
             }
         })
@@ -204,13 +206,16 @@ fn rank_by(mode: u8, mut repos: Vec<Repo>, stats: &HashMap<String, (u64, u64)>) 
     repos
 }
 
-fn rank(config: &AppConfig, repos: Vec<Repo>) -> Vec<Repo> {
+fn rank(config: &AppConfig, mut repos: Vec<Repo>) -> Vec<Repo> {
     let mode = read_sort_mode(config);
-    let stats = if mode == 1 || mode == 2 {
-        read_history_stats(config)
-    } else {
-        HashMap::new()
-    };
+    let stats = read_history_stats(config);
+    // Attach usage stats to every repo so the table view can show/sort by them.
+    for repo in repos.iter_mut() {
+        if let Some((uses, last)) = stats.get(&repo.path) {
+            repo.uses = *uses;
+            repo.last_used = *last;
+        }
+    }
     rank_by(mode, repos, &stats)
 }
 
@@ -446,6 +451,8 @@ mod tests {
             kind: "repo".into(),
             path: path.into(),
             distro: "Ubuntu".into(),
+            uses: 0,
+            last_used: 0,
         }
     }
 
