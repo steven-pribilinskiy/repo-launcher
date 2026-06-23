@@ -13,15 +13,23 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { applyTheme } from "@/lib/theme";
-import { timeAgo } from "@/lib/format";
-import type { ActionDef, ActionKind, ActionRole, AppConfig, BuildInfo } from "@/types";
+import { formatBytes, timeAgo } from "@/lib/format";
+import type {
+  ActionDef,
+  ActionKind,
+  ActionRole,
+  AppConfig,
+  BuildInfo,
+  DataInfo,
+  PathStat,
+} from "@/types";
 
 const inputCls =
   "w-full rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-900 outline-none focus:border-indigo-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100";
 const labelCls = "text-xs font-medium text-zinc-500 dark:text-zinc-400";
 const PLACEHOLDERS = ["{path}", "{wslpath}", "{winpath}", "{name}", "{distro}", "{vscode_uri}"];
 
-type Tab = "general" | "actions" | "updates";
+type Tab = "general" | "actions" | "updates" | "data";
 
 let nextId = 0;
 function freshActionId() {
@@ -114,7 +122,7 @@ export default function Settings() {
     <div className="flex h-screen flex-col bg-white text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100">
       <header className="flex items-center justify-between border-b border-zinc-200 px-5 pt-3 dark:border-zinc-800">
         <div className="flex items-end gap-1">
-          {(["general", "actions", "updates"] as Tab[]).map((name) => (
+          {(["general", "actions", "updates", "data"] as Tab[]).map((name) => (
             <button
               key={name}
               type="button"
@@ -155,6 +163,7 @@ export default function Settings() {
         {tab === "actions" && (
           <ActionsTab actions={config.actions} onChange={(actions) => patch({ actions })} />
         )}
+        {tab === "data" && <DataTab />}
       </div>
 
       <footer className="flex items-center justify-end border-t border-zinc-200 px-5 py-2 text-[11px] text-zinc-400 dark:border-zinc-800 dark:text-zinc-500">
@@ -330,6 +339,97 @@ function Toggle({
       />
       <span className="text-sm">{label}</span>
     </label>
+  );
+}
+
+// ── Data tab ──────────────────────────────────────────────────────────────────
+
+function FileCard({ title, stat, extra }: { title: string; stat: PathStat; extra: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+      <div className="mb-1 flex items-center justify-between">
+        <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">{title}</span>
+        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          {stat.exists ? `${formatBytes(stat.size)} · updated ${timeAgo(stat.modified_unix)}` : "missing"}
+        </span>
+      </div>
+      <code className="block break-all text-xs text-zinc-500 dark:text-zinc-400">{stat.path}</code>
+      <div className="mt-1 text-xs text-indigo-600 dark:text-indigo-400">{extra}</div>
+    </div>
+  );
+}
+
+function DataTab() {
+  const [data, setData] = useState<DataInfo | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = () => api.dataInfo().then(setData).catch(() => {});
+  useEffect(() => {
+    load();
+  }, []);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      await api.refreshRepos();
+      await load();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  if (!data) {
+    return <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>;
+  }
+
+  return (
+    <div className="flex max-w-3xl flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          The launcher reads the same goto-repo files as the <code>fr</code>/<code>g</code> shell
+          finder — distro <span className="font-medium">{data.distro}</span>.
+        </p>
+        <button
+          type="button"
+          onClick={refresh}
+          disabled={refreshing}
+          className="shrink-0 rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 disabled:opacity-60 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          {refreshing ? "Rebuilding…" : "Rebuild cache"}
+        </button>
+      </div>
+
+      <FileCard title="Repos cache" stat={data.repos_tsv} extra={`${data.repo_count} repos`} />
+      <FileCard
+        title="Sort"
+        stat={data.sort_file}
+        extra={`mode ${data.sort_mode} — ${data.sort_label}`}
+      />
+      <FileCard
+        title="Usage history"
+        stat={data.history_file}
+        extra={`${data.history_entries} entries across ${data.unique_paths} paths`}
+      />
+
+      <div>
+        <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+          Most used
+        </h3>
+        <div className="flex flex-col gap-1 rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
+          {data.top_used.length === 0 && (
+            <span className="px-1 text-xs text-zinc-400">No history yet.</span>
+          )}
+          {data.top_used.map((entry) => (
+            <div key={entry.path} className="flex items-center justify-between gap-3 px-1 text-xs">
+              <code className="truncate text-zinc-600 dark:text-zinc-300">{entry.path}</code>
+              <span className="shrink-0 text-zinc-400 dark:text-zinc-500">
+                {entry.uses}× · {timeAgo(entry.last_unix)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

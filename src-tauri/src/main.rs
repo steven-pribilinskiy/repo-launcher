@@ -3,7 +3,9 @@
 
 mod commands;
 
-use commands::cache::{cycle_sort, get_sort, maybe_refresh, read_repos, refresh_repos};
+use commands::cache::{
+    cycle_sort, data_info, get_sort, maybe_refresh, read_repos, refresh_repos,
+};
 use commands::config::load_config;
 use commands::repos::{list_distros, run_action};
 use tauri::{
@@ -139,6 +141,7 @@ fn main() {
             maybe_refresh,
             get_sort,
             cycle_sort,
+            data_info,
             run_action,
             list_distros,
             open_settings,

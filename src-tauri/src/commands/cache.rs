@@ -1,8 +1,9 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::Serialize;
 use tauri::AppHandle;
 
 use super::config::{load_config, AppConfig};
@@ -332,6 +333,96 @@ pub fn cycle_sort(app: AppHandle) -> Result<Vec<Repo>, String> {
     write_sort_mode(&config, next)?;
     let repos = read_repo_cache(&config)?;
     Ok(rank(&config, repos))
+}
+
+// ── Data diagnostics ─────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct PathStat {
+    pub path: String,
+    pub exists: bool,
+    pub size: u64,
+    pub modified_unix: u64,
+}
+
+#[derive(Serialize)]
+pub struct TopUsed {
+    pub path: String,
+    pub uses: u64,
+    pub last_unix: u64,
+}
+
+#[derive(Serialize)]
+pub struct DataInfo {
+    pub distro: String,
+    pub cache_dir: String,
+    pub config_dir: String,
+    pub repos_tsv: PathStat,
+    pub sort_file: PathStat,
+    pub history_file: PathStat,
+    pub repo_count: usize,
+    pub sort_mode: u8,
+    pub sort_label: String,
+    pub unique_paths: usize,
+    pub history_entries: u64,
+    pub top_used: Vec<TopUsed>,
+}
+
+fn path_stat(path: &Path) -> PathStat {
+    let meta = std::fs::metadata(path).ok();
+    PathStat {
+        path: path.display().to_string(),
+        exists: meta.is_some(),
+        size: meta.as_ref().map(|meta| meta.len()).unwrap_or(0),
+        modified_unix: meta
+            .and_then(|meta| meta.modified().ok())
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|dur| dur.as_secs())
+            .unwrap_or(0),
+    }
+}
+
+/// Everything that drives the app: the goto-repo files it reads, their sizes, the
+/// resolved distro, the sort mode, and the most-used paths from history.
+#[tauri::command]
+pub fn data_info(app: AppHandle) -> Result<DataInfo, String> {
+    let config = load_config(&app)?;
+    let (cache_dir, config_dir) = goto_dirs(&config)?;
+    let repos = read_repo_cache(&config).unwrap_or_default();
+    let stats = read_history_stats(&config);
+    let sort_mode = read_sort_mode(&config);
+    let labels = ["alpha", "recent", "most-used"];
+
+    let mut top: Vec<TopUsed> = stats
+        .iter()
+        .map(|(path, (uses, last))| TopUsed {
+            path: path.clone(),
+            uses: *uses,
+            last_unix: *last,
+        })
+        .collect();
+    top.sort_by(|left, right| {
+        right
+            .uses
+            .cmp(&left.uses)
+            .then(right.last_unix.cmp(&left.last_unix))
+    });
+    top.truncate(12);
+
+    Ok(DataInfo {
+        distro: resolve_distro(&config),
+        cache_dir: cache_dir.display().to_string(),
+        config_dir: config_dir.display().to_string(),
+        repos_tsv: path_stat(&cache_dir.join("repos.tsv")),
+        sort_file: path_stat(&cache_dir.join("sort")),
+        history_file: path_stat(&config_dir.join("history")),
+        repo_count: repos.len(),
+        sort_mode,
+        sort_label: labels.get(sort_mode as usize).unwrap_or(&"?").to_string(),
+        unique_paths: stats.len(),
+        history_entries: stats.values().map(|(uses, _)| *uses).sum(),
+        top_used: top,
+    })
 }
 
 #[cfg(test)]

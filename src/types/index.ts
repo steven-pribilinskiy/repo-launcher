@@ -29,6 +29,34 @@ export type BuildInfo = {
   built_unix: number;
 };
 
+export type PathStat = {
+  path: string;
+  exists: boolean;
+  size: number;
+  modified_unix: number;
+};
+
+export type TopUsed = {
+  path: string;
+  uses: number;
+  last_unix: number;
+};
+
+export type DataInfo = {
+  distro: string;
+  cache_dir: string;
+  config_dir: string;
+  repos_tsv: PathStat;
+  sort_file: PathStat;
+  history_file: PathStat;
+  repo_count: number;
+  sort_mode: number;
+  sort_label: string;
+  unique_paths: number;
+  history_entries: number;
+  top_used: TopUsed[];
+};
+
 export type AppConfig = {
   hotkey: string;
   cache_ttl_seconds: number;

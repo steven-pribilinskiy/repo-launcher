@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ActionDef, AppConfig, BuildInfo, Repo } from "@/types";
+import type { ActionDef, AppConfig, BuildInfo, DataInfo, Repo } from "@/types";
 
 export const api = {
   /** Read the goto-repo cache, ranked by the shared sort mode. */
@@ -36,6 +36,8 @@ export const api = {
   defaultConfig: () => invoke<AppConfig>("default_config"),
 
   appBuildInfo: () => invoke<BuildInfo>("app_build_info"),
+
+  dataInfo: () => invoke<DataInfo>("data_info"),
 
   resetWindowGeometry: () => invoke<void>("reset_window_geometry"),
 };
