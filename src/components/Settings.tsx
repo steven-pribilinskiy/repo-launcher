@@ -35,7 +35,6 @@ export default function Settings() {
   const [distros, setDistros] = useState<string[]>([]);
   const [build, setBuild] = useState<BuildInfo | null>(null);
   const [tab, setTab] = useState<Tab>("general");
-  const [status, setStatus] = useState<string | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
   const dirty = useRef(false);
 
@@ -57,13 +56,32 @@ export default function Settings() {
       try {
         await api.saveConfig(cleaned);
         await api.updateHotkey(cleaned.hotkey).catch(() => {});
-        setStatus("Saved");
       } catch (error) {
-        setStatus(`Error: ${error}`);
+        console.error("Failed to save settings:", error);
       }
     }, 400);
     return () => clearTimeout(handle);
   }, [config]);
+
+  // Esc closes the settings window — but first close the reset modal, or blur a
+  // focused field, so it only closes when nothing is being edited.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (resetOpen) {
+        setResetOpen(false);
+        return;
+      }
+      const active = document.activeElement as HTMLElement | null;
+      if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) {
+        active.blur();
+        return;
+      }
+      getCurrentWindow().hide();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [resetOpen]);
 
   const isDefault = useMemo(
     () => (config && defaults ? JSON.stringify(config) === JSON.stringify(defaults) : true),
@@ -90,7 +108,6 @@ export default function Settings() {
     applyTheme(defaults.theme);
     api.updateHotkey(defaults.hotkey).catch(() => {});
     setResetOpen(false);
-    setStatus("Reset to defaults");
   };
 
   return (
@@ -113,11 +130,6 @@ export default function Settings() {
           ))}
         </div>
         <div className="flex items-center gap-3">
-          {status && (
-            <span className="flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-              <Check className="h-3.5 w-3.5" /> {status}
-            </span>
-          )}
           {!isDefault && (
             <button
               type="button"

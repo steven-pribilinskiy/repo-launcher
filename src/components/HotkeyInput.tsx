@@ -63,6 +63,7 @@ export function HotkeyInput({ value, onChange, placeholder = "Click, then press 
           if (event.key === "Tab") return; // let focus move away
           event.preventDefault();
           if (event.key === "Escape") {
+            event.stopPropagation();
             event.currentTarget.blur();
             return;
           }
