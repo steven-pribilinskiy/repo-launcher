@@ -64,6 +64,12 @@ export function useKeyboardNav({ results, onActionComplete }: UseKeyboardNavOpti
         void cycleSort();
         return;
       }
+      // Ctrl+, opens Settings.
+      if (event.ctrlKey && !event.altKey && !event.metaKey && event.key === ",") {
+        event.preventDefault();
+        void api.openSettings();
+        return;
+      }
 
       for (const action of config?.actions ?? []) {
         if (!action.enabled) continue;

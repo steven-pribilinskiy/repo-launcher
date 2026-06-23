@@ -32,4 +32,6 @@ export const api = {
   saveConfig: (config: AppConfig) => invoke<void>("save_config", { config }),
 
   resetConfig: () => invoke<AppConfig>("reset_config"),
+
+  resetWindowGeometry: () => invoke<void>("reset_window_geometry"),
 };

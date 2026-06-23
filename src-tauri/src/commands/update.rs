@@ -90,6 +90,11 @@ fn exe_signature(path: &Path) -> Option<(u64, SystemTime)> {
 /// arrive via the installer (which closes and relaunches the app); this watcher is
 /// simply a no-op there, and the startup notification still fires after relaunch.
 pub fn spawn_restart_watcher(app: AppHandle) {
+    // Dev builds are rebuilt and relaunched by `tauri dev`; a restart-on-change
+    // watcher would fight it and thrash. Only watch in release builds.
+    if cfg!(debug_assertions) {
+        return;
+    }
     let Ok(exe) = std::env::current_exe() else { return };
     let Some(baseline) = exe_signature(&exe) else { return };
 

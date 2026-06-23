@@ -20,6 +20,8 @@ function Kbd({ children }: { children: ReactNode }) {
   );
 }
 
+// The bar doubles as the window's drag handle: empty areas (the elements carrying
+// data-tauri-drag-region) move the window; the buttons inside stay clickable.
 export function ActionBar({
   actions,
   onRun,
@@ -31,8 +33,11 @@ export function ActionBar({
   const enabled = actions.filter((action) => action.enabled);
 
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-zinc-200 px-3 py-2 dark:border-zinc-700/50">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+    <div
+      data-tauri-drag-region
+      className="flex flex-col gap-1.5 border-t border-zinc-200 px-3 py-2 dark:border-zinc-700/50"
+    >
+      <div data-tauri-drag-region className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {enabled.map((action) => (
           <button
             key={action.id}
@@ -46,21 +51,23 @@ export function ActionBar({
           </button>
         ))}
       </div>
-      <div className="flex shrink-0 items-center gap-3">
-        <span className="text-[11px] text-zinc-400 dark:text-zinc-600">{repoCount}</span>
+      <div data-tauri-drag-region className="flex items-center justify-end gap-3">
+        <span className="text-[11px] text-zinc-400 dark:text-zinc-600">{repoCount} repos</span>
         <button
           type="button"
           onClick={onCycleSort}
-          title="Cycle sort (Ctrl+S)"
+          title="Cycle sort order"
           className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60"
         >
-          <Kbd>^S</Kbd>
-          <span className="text-[11px] text-zinc-500 dark:text-zinc-400">{SORT_LABELS[sortMode]}</span>
+          <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+            Sort: {SORT_LABELS[sortMode]}
+          </span>
+          <Kbd>Ctrl+S</Kbd>
         </button>
         <button
           type="button"
           onClick={onOpenSettings}
-          title="Settings"
+          title="Settings (Ctrl+,)"
           className="rounded p-1 text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-600 dark:text-zinc-500 dark:hover:bg-zinc-700/60 dark:hover:text-zinc-300"
         >
           <SettingsIcon className="h-3.5 w-3.5" />

@@ -79,7 +79,7 @@ fn derive_config_dir(cache_path: &str) -> PathBuf {
 fn wsl_home(distro: &str) -> Result<String, String> {
     static HOME_CACHE: std::sync::OnceLock<std::sync::Mutex<HashMap<String, String>>> =
         std::sync::OnceLock::new();
-    let cache = HOME_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let cache = HOME_CACHE.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
     if let Some(home) = cache.lock().unwrap().get(distro) {
         return Ok(home.clone());
     }

@@ -64,6 +64,9 @@ pub struct AppConfig {
     /// Show a native OS notification after an update.
     #[serde(default = "default_true")]
     pub notify_on_update: bool,
+    /// Remember the popup's last position across launches (size is always kept).
+    #[serde(default = "default_true")]
+    pub remember_position: bool,
     /// The configurable action registry.
     #[serde(default = "default_actions")]
     pub actions: Vec<ActionDef>,
@@ -93,6 +96,7 @@ impl Default for AppConfig {
             theme: default_theme(),
             auto_restart_on_update: true,
             notify_on_update: true,
+            remember_position: true,
             actions: default_actions(),
         }
     }

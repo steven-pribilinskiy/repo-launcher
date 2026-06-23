@@ -65,24 +65,46 @@ fn main() {
                 })
                 .build(app)?;
 
-            // --- Popup focus behavior ---
+            // --- Main popup window behavior ---
             // REPO_LAUNCHER_NO_AUTOHIDE keeps the popup open when it loses focus;
             // REPO_LAUNCHER_SHOW_ON_START opens it at launch. Both help on
             // environments without a system tray or a working global hotkey.
+            let autohide = std::env::var_os("REPO_LAUNCHER_NO_AUTOHIDE").is_none();
             if let Some(window) = app.get_webview_window("main") {
-                if std::env::var_os("REPO_LAUNCHER_NO_AUTOHIDE").is_none() {
-                    let handle = window.clone();
-                    window.on_window_event(move |event| {
-                        if let WindowEvent::Focused(false) = event {
+                let handle = window.clone();
+                window.on_window_event(move |event| match event {
+                    // Save geometry on focus loss (precedes every hide), then hide.
+                    WindowEvent::Focused(false) => {
+                        commands::window_state::persist(&handle);
+                        if autohide {
                             let _ = handle.hide();
                         }
-                    });
-                }
+                    }
+                    // The popup is never truly closed — closing just hides it; the app
+                    // quits only via the tray, so the background launcher stays alive.
+                    WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        let _ = handle.hide();
+                    }
+                    _ => {}
+                });
                 if std::env::var_os("REPO_LAUNCHER_SHOW_ON_START").is_some() {
+                    commands::window_state::restore(&window, config.remember_position);
                     let _ = window.show();
                     let _ = window.set_focus();
                     let _ = window.emit("window-shown", ());
                 }
+            }
+
+            // Settings window: closing it just hides it, never quits the app.
+            if let Some(settings) = app.get_webview_window("settings") {
+                let handle = settings.clone();
+                settings.on_window_event(move |event| {
+                    if let WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = handle.hide();
+                    }
+                });
             }
 
             // --- Global shortcut ---
@@ -118,6 +140,7 @@ fn main() {
             commands::config::get_config,
             commands::config::save_config,
             commands::config::reset_config,
+            commands::window_state::reset_window_geometry,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -128,7 +151,8 @@ fn toggle_window(app: &tauri::AppHandle) {
         if window.is_visible().unwrap_or(false) {
             let _ = window.hide();
         } else {
-            let _ = window.center();
+            let remember = load_config(app).map(|cfg| cfg.remember_position).unwrap_or(true);
+            commands::window_state::restore(&window, remember);
             let _ = window.show();
             let _ = window.set_focus();
             let _ = window.emit("window-shown", ());
@@ -144,9 +168,13 @@ fn show_settings(app: &tauri::AppHandle) {
     }
 }
 
-/// Show the settings window (invoked from the popup's gear button).
+/// Show the settings window (invoked from the popup's gear button). Hides the
+/// always-on-top popup first so it doesn't cover the settings window.
 #[tauri::command]
 fn open_settings(app: tauri::AppHandle) {
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.hide();
+    }
     show_settings(&app);
 }
 

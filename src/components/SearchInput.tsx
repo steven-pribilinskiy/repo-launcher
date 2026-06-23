@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 
 type SearchInputProps = {
   value: string;
@@ -25,6 +25,17 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
         />
         {isLoading && (
           <div className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-zinc-300 border-t-zinc-600 dark:border-zinc-600 dark:border-t-zinc-300" />
+        )}
+        {!isLoading && value.length > 0 && (
+          <button
+            type="button"
+            onClick={() => onChange("")}
+            title="Clear search (Esc)"
+            aria-label="Clear search"
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600 dark:text-zinc-500 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         )}
       </div>
     );
