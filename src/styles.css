@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+/* Class-based dark mode (driven by lib/theme.ts toggling .dark on <html>). */
+@custom-variant dark (&:where(.dark, .dark *));
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
+
+#root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The popup window: transparent, rounded, clipped overlay. */
+html[data-window="main"] {
+  border-radius: 12px;
+  overflow: hidden;
+  clip-path: inset(0 round 12px);
+}
+html[data-window="main"] body {
+  background: transparent;
+  overflow: hidden;
+}
+
+/* The settings window: normal opaque, scrollable window. */
+html[data-window="settings"] body {
+  overflow: hidden;
+}
+
+.repo-list::-webkit-scrollbar,
+.overflow-y-auto::-webkit-scrollbar {
+  width: 6px;
+}
+
+.repo-list::-webkit-scrollbar-track,
+.overflow-y-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.repo-list::-webkit-scrollbar-thumb,
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  background: #9ca3af;
+  border-radius: 3px;
+}
+
+.dark .repo-list::-webkit-scrollbar-thumb,
+.dark .overflow-y-auto::-webkit-scrollbar-thumb {
+  background: #4b5563;
+}
