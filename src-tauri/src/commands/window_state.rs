@@ -1,7 +1,31 @@
 use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
+
+fn last_activity() -> &'static Mutex<Instant> {
+    static CELL: OnceLock<Mutex<Instant>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(Instant::now()))
+}
+
+/// Record window activity (shown / focused / resized / moved) so an immediately
+/// following spurious blur can be ignored.
+pub fn mark_activity() {
+    if let Ok(mut guard) = last_activity().lock() {
+        *guard = Instant::now();
+    }
+}
+
+/// True if there was activity within the last `within_ms` — used to suppress the
+/// focus-race blur that fires right after showing or while resizing.
+pub fn recently_active(within_ms: u64) -> bool {
+    last_activity()
+        .lock()
+        .map(|guard| guard.elapsed().as_millis() < u128::from(within_ms))
+        .unwrap_or(false)
+}
 
 const DEFAULT_WIDTH: u32 = 760;
 const DEFAULT_HEIGHT: u32 = 600;

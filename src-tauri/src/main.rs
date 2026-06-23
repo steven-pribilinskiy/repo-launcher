@@ -75,14 +75,23 @@ fn main() {
             if let Some(window) = app.get_webview_window("main") {
                 let handle = window.clone();
                 window.on_window_event(move |event| match event {
+                    // Track interactions so the focus-race blur (fired right after
+                    // showing, or while resizing/moving the frameless window) doesn't
+                    // trigger an auto-hide.
+                    WindowEvent::Focused(true) | WindowEvent::Resized(_) | WindowEvent::Moved(_) => {
+                        commands::window_state::mark_activity();
+                    }
                     // Save geometry on focus loss (precedes every hide), then hide —
-                    // but never during first-run onboarding.
+                    // but never during onboarding or right after an interaction.
                     WindowEvent::Focused(false) => {
                         commands::window_state::persist(&handle);
                         let onboarded = load_config(handle.app_handle())
                             .map(|cfg| cfg.onboarded)
                             .unwrap_or(true);
-                        if autohide_enabled && onboarded {
+                        if autohide_enabled
+                            && onboarded
+                            && !commands::window_state::recently_active(400)
+                        {
                             let _ = handle.hide();
                         }
                     }
@@ -98,6 +107,7 @@ fn main() {
                 // the onboarding (they don't know the hotkey yet).
                 if std::env::var_os("REPO_LAUNCHER_SHOW_ON_START").is_some() || !config.onboarded {
                     commands::window_state::restore(&window, config.remember_position);
+                    commands::window_state::mark_activity();
                     let _ = window.show();
                     let _ = window.set_focus();
                     let _ = window.emit("window-shown", ());
@@ -164,6 +174,7 @@ fn toggle_window(app: &tauri::AppHandle) {
         } else {
             let remember = load_config(app).map(|cfg| cfg.remember_position).unwrap_or(true);
             commands::window_state::restore(&window, remember);
+            commands::window_state::mark_activity();
             let _ = window.show();
             let _ = window.set_focus();
             let _ = window.emit("window-shown", ());
