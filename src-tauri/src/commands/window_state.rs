@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
 
-const DEFAULT_WIDTH: u32 = 600;
-const DEFAULT_HEIGHT: u32 = 500;
+const DEFAULT_WIDTH: u32 = 760;
+const DEFAULT_HEIGHT: u32 = 600;
 
 #[derive(Default, Serialize, Deserialize, Clone, Copy)]
 pub struct WindowGeometry {
