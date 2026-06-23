@@ -143,27 +143,37 @@ fn exec(id: &str, label: &str, hotkey: &str, enabled: bool, program: &str, args:
 /// Enabled-by-default: the copy actions + the Windows openers. The editors
 /// (VS Code / Cursor / Zed) ship present-but-disabled.
 pub fn default_actions() -> Vec<ActionDef> {
-    let mut actions = vec![
-        clipboard("copy-abs", "Copy absolute path", "", true, "{winpath}"),
-        clipboard("copy-wsl", "Copy WSL path", "Alt+P", true, "{wslpath}"),
-        clipboard("copy-name", "Copy folder name", "Alt+N", true, "{name}"),
-    ];
-    // The primary action fires on Enter (role-based, independent of any custom hotkey).
+    // Primary (Enter) copies the POSIX path (/home/...) — what's pasted most in a
+    // WSL workflow. The Windows UNC path is a separate Alt+P action on Windows.
+    let mut actions = vec![clipboard("copy-path", "Copy path", "", true, "{wslpath}")];
     actions[0].role = Some("primary".to_string());
 
     #[cfg(target_os = "windows")]
+    actions.push(clipboard("copy-win", "Copy Windows path", "Alt+P", true, "{winpath}"));
+
+    actions.push(clipboard("copy-name", "Copy folder name", "Alt+N", true, "{name}"));
+
+    #[cfg(target_os = "windows")]
     {
-        // Tabby's CLI: `Tabby.exe open <directory>` opens a shell there. Tabby.exe
-        // may not be on PATH — if the button does nothing, set its full path in
-        // Settings → Actions → Open in Tabby → Program.
-        actions.push(exec("tabby", "Open in Tabby", "Alt+B", true, "Tabby.exe", &["open", "{winpath}"]));
+        // Tabby isn't on PATH; launch it from its standard per-user install dir via
+        // cmd (which expands %LOCALAPPDATA%). `Tabby.exe open <dir>` opens a shell there.
+        actions.push(exec(
+            "tabby",
+            "Open in Tabby",
+            "Alt+B",
+            true,
+            "cmd",
+            &["/c", "start", "", "%LOCALAPPDATA%\\Programs\\Tabby\\Tabby.exe", "open", "{winpath}"],
+        ));
+        // `-w 0 nt` opens a new TAB in the current Windows Terminal window (or a new
+        // window if none). Terminal uses the WSL profile; WSL shell runs wsl directly.
         actions.push(exec(
             "wt",
             "Open in Windows Terminal",
             "Alt+T",
             true,
             "wt.exe",
-            &["-p", "{distro}", "-d", "{winpath}"],
+            &["-w", "0", "nt", "-p", "{distro}", "-d", "{winpath}"],
         ));
         actions.push(exec("explorer", "Open in explorer.exe", "Alt+E", true, "explorer.exe", &["{winpath}"]));
         actions.push(exec(
@@ -171,8 +181,8 @@ pub fn default_actions() -> Vec<ActionDef> {
             "Open WSL shell here",
             "Alt+S",
             true,
-            "cmd",
-            &["/c", "start", "", "wsl.exe", "-d", "{distro}", "--cd", "{wslpath}"],
+            "wt.exe",
+            &["-w", "0", "nt", "wsl.exe", "-d", "{distro}", "--cd", "{wslpath}"],
         ));
         actions.push(exec("vscode", "Open in VS Code", "Alt+V", false, "cmd", &["/c", "code", "--folder-uri", "{vscode_uri}"]));
         actions.push(exec("cursor", "Open in Cursor", "Alt+R", false, "cmd", &["/c", "cursor", "--folder-uri", "{vscode_uri}"]));
