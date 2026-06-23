@@ -9,6 +9,7 @@ type RepoStore = {
   config: AppConfig | null;
   sortMode: number;
   multiDistro: boolean;
+  lastLoadAt: number;
 
   loadConfig: () => Promise<void>;
   loadRepos: () => Promise<void>;
@@ -23,6 +24,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   config: null,
   sortMode: 2,
   multiDistro: false,
+  lastLoadAt: 0,
 
   loadConfig: async () => {
     try {
@@ -34,7 +36,9 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   },
 
   loadRepos: async () => {
-    if (get().isLoading) return;
+    // Skip if already loading or loaded very recently — the mount effect and the
+    // window-shown listener both fire on open; this dedupes them (no flicker).
+    if (get().isLoading || Date.now() - get().lastLoadAt < 500) return;
     set({ isLoading: true, error: null });
     try {
       const [repos, sortMode] = await Promise.all([api.readRepos(), api.getSort()]);
@@ -44,6 +48,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
         sortMode,
         isLoading: false,
         multiDistro: distros.size > 1,
+        lastLoadAt: Date.now(),
       });
       // Kick a background rebuild if the cache is stale; next open sees it fresh.
       api.maybeRefresh().catch(() => {});

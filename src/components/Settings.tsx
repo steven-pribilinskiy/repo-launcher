@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { HotkeyInput } from "@/components/HotkeyInput";
 import {
   Check,
   ChevronDown,
@@ -191,12 +193,7 @@ function GeneralTab({
     <div className="grid max-w-3xl grid-cols-2 gap-4">
       <label className="flex flex-col gap-1">
         <span className={labelCls}>Global hotkey</span>
-        <input
-          className={inputCls}
-          value={config.hotkey}
-          onChange={(event) => patch({ hotkey: event.target.value })}
-          placeholder="Alt+`"
-        />
+        <HotkeyInput value={config.hotkey} onChange={(hotkey) => patch({ hotkey })} />
       </label>
       <label className="flex flex-col gap-1">
         <span className={labelCls}>Theme</span>
@@ -335,14 +332,20 @@ function ActionsTab({
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [kebabId, setKebabId] = useState<string | null>(null);
+  // The kebab menu renders in a portal at fixed viewport coords so it's never
+  // clipped by the table's overflow.
+  const [kebab, setKebab] = useState<{ index: number; top: number; right: number } | null>(null);
 
   useEffect(() => {
-    if (!kebabId) return;
-    const close = () => setKebabId(null);
+    if (!kebab) return;
+    const close = () => setKebab(null);
     window.addEventListener("click", close);
-    return () => window.removeEventListener("click", close);
-  }, [kebabId]);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [kebab]);
 
   const patchAction = (index: number, changes: Partial<ActionDef>) =>
     onChange(actions.map((action, current) => (current === index ? { ...action, ...changes } : action)));
@@ -447,43 +450,22 @@ function ActionsTab({
               </button>
               <TriggerBadge action={action} />
               <span className="text-xs capitalize text-zinc-500 dark:text-zinc-400">{action.kind}</span>
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setKebabId(kebabId === action.id ? null : action.id);
-                  }}
-                  className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                  title="More"
-                >
-                  <MoreVertical className="h-4 w-4" />
-                </button>
-                {kebabId === action.id && (
-                  <div
-                    className="absolute right-0 top-7 z-10 w-52 overflow-hidden rounded-md border border-zinc-200 bg-white py-1 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <KebabItem onClick={() => setRole(index, "primary")} active={action.role === "primary"}>
-                      Make primary (Enter)
-                    </KebabItem>
-                    <KebabItem
-                      onClick={() => setRole(index, "alternative")}
-                      active={action.role === "alternative"}
-                    >
-                      Make alternative (Alt+Enter)
-                    </KebabItem>
-                    {action.role && (
-                      <KebabItem onClick={() => setRole(index, null)}>Clear role</KebabItem>
-                    )}
-                    <div className="my-1 border-t border-zinc-100 dark:border-zinc-700" />
-                    <KebabItem onClick={() => setEditingId(action.id)}>Edit details…</KebabItem>
-                    <KebabItem onClick={() => removeAction(index)} danger>
-                      Delete
-                    </KebabItem>
-                  </div>
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setKebab(
+                    kebab?.index === index
+                      ? null
+                      : { index, top: rect.bottom + 4, right: window.innerWidth - rect.right },
+                  );
+                }}
+                className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                title="More"
+              >
+                <MoreVertical className="h-4 w-4" />
+              </button>
             </div>
             {editingId === action.id && (
               <ActionEditor action={action} onChange={(changes) => patchAction(index, changes)} />
@@ -494,6 +476,64 @@ function ActionsTab({
       <p className="mt-2 text-[11px] text-zinc-400 dark:text-zinc-500">
         Placeholders: {PLACEHOLDERS.join("  ")}
       </p>
+
+      {kebab &&
+        actions[kebab.index] &&
+        createPortal(
+          <div
+            className="fixed z-50 w-52 overflow-hidden rounded-md border border-zinc-200 bg-white py-1 text-sm shadow-lg dark:border-zinc-700 dark:bg-zinc-800"
+            style={{ top: kebab.top, right: kebab.right }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <KebabItem
+              onClick={() => {
+                setRole(kebab.index, "primary");
+                setKebab(null);
+              }}
+              active={actions[kebab.index].role === "primary"}
+            >
+              Make primary (Enter)
+            </KebabItem>
+            <KebabItem
+              onClick={() => {
+                setRole(kebab.index, "alternative");
+                setKebab(null);
+              }}
+              active={actions[kebab.index].role === "alternative"}
+            >
+              Make alternative (Alt+Enter)
+            </KebabItem>
+            {actions[kebab.index].role && (
+              <KebabItem
+                onClick={() => {
+                  setRole(kebab.index, null);
+                  setKebab(null);
+                }}
+              >
+                Clear role
+              </KebabItem>
+            )}
+            <div className="my-1 border-t border-zinc-100 dark:border-zinc-700" />
+            <KebabItem
+              onClick={() => {
+                setEditingId(actions[kebab.index].id);
+                setKebab(null);
+              }}
+            >
+              Edit details…
+            </KebabItem>
+            <KebabItem
+              onClick={() => {
+                removeAction(kebab.index);
+                setKebab(null);
+              }}
+              danger
+            >
+              Delete
+            </KebabItem>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
@@ -541,8 +581,15 @@ function ActionEditor({
   action: ActionDef;
   onChange: (changes: Partial<ActionDef>) => void;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, []);
   return (
-    <div className="grid grid-cols-2 gap-3 border-b border-zinc-100 bg-zinc-50 px-4 py-3 dark:border-zinc-800/60 dark:bg-zinc-800/30">
+    <div
+      ref={ref}
+      className="grid grid-cols-2 gap-3 border-b border-zinc-100 bg-zinc-50 px-4 py-3 dark:border-zinc-800/60 dark:bg-zinc-800/30"
+    >
       <label className="flex flex-col gap-1">
         <span className={labelCls}>Label</span>
         <input
@@ -553,12 +600,7 @@ function ActionEditor({
       </label>
       <label className="flex flex-col gap-1">
         <span className={labelCls}>Custom hotkey</span>
-        <input
-          className={inputCls}
-          value={action.hotkey}
-          onChange={(event) => onChange({ hotkey: event.target.value })}
-          placeholder="e.g. Alt+P"
-        />
+        <HotkeyInput value={action.hotkey} onChange={(hotkey) => onChange({ hotkey })} />
       </label>
       <label className="flex flex-col gap-1">
         <span className={labelCls}>Type</span>
@@ -612,16 +654,19 @@ function ActionEditor({
 
 // ── Reset-to-defaults confirmation ────────────────────────────────────────────
 
-type Diff = { label: string; from: string; to: string };
+type FieldDiff = { label: string; from: string; to: string };
+type ActionDiff =
+  | { kind: "added" | "removed"; label: string }
+  | { kind: "modified"; label: string; changes: FieldDiff[] };
 
 function describe(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "(auto)";
+  if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "boolean") return value ? "on" : "off";
-  if (Array.isArray(value)) return value.length ? value.join(" ") : "(auto)";
+  if (Array.isArray(value)) return value.length ? value.join(" ") : "—";
   return String(value);
 }
 
-function computeDiffs(config: AppConfig, defaults: AppConfig): Diff[] {
+function fieldDiffs(config: AppConfig, defaults: AppConfig): FieldDiff[] {
   const fields: [string, keyof AppConfig][] = [
     ["Global hotkey", "hotkey"],
     ["Theme", "theme"],
@@ -633,20 +678,102 @@ function computeDiffs(config: AppConfig, defaults: AppConfig): Diff[] {
     ["Auto-restart on update", "auto_restart_on_update"],
     ["Notify on update", "notify_on_update"],
   ];
-  const diffs: Diff[] = [];
+  const diffs: FieldDiff[] = [];
   for (const [label, key] of fields) {
     if (JSON.stringify(config[key]) !== JSON.stringify(defaults[key])) {
       diffs.push({ label, from: describe(config[key]), to: describe(defaults[key]) });
     }
   }
-  if (JSON.stringify(config.actions) !== JSON.stringify(defaults.actions)) {
-    diffs.push({
-      label: "Actions",
-      from: `${config.actions.length} (customized)`,
-      to: `${defaults.actions.length} (defaults)`,
-    });
-  }
   return diffs;
+}
+
+function actionDiffs(config: AppConfig, defaults: AppConfig): ActionDiff[] {
+  const current = new Map(config.actions.map((action) => [action.id, action]));
+  const target = new Map(defaults.actions.map((action) => [action.id, action]));
+  const out: ActionDiff[] = [];
+
+  for (const action of config.actions) {
+    if (!target.has(action.id)) out.push({ kind: "removed", label: action.label || action.id });
+  }
+  for (const action of defaults.actions) {
+    if (!current.has(action.id)) out.push({ kind: "added", label: action.label || action.id });
+  }
+
+  const compared: [string, keyof ActionDef][] = [
+    ["label", "label"],
+    ["enabled", "enabled"],
+    ["hotkey", "hotkey"],
+    ["role", "role"],
+    ["type", "kind"],
+    ["copies", "template"],
+    ["program", "program"],
+    ["args", "args"],
+  ];
+  for (const action of config.actions) {
+    const other = target.get(action.id);
+    if (!other) continue;
+    const changes: FieldDiff[] = [];
+    for (const [label, key] of compared) {
+      if (JSON.stringify(action[key]) !== JSON.stringify(other[key])) {
+        changes.push({ label, from: describe(action[key]), to: describe(other[key]) });
+      }
+    }
+    if (changes.length) out.push({ kind: "modified", label: action.label || action.id, changes });
+  }
+  return out;
+}
+
+function FieldDiffRow({ diff }: { diff: FieldDiff }) {
+  return (
+    <div className="flex items-center justify-between gap-2 text-sm">
+      <span className="text-zinc-600 dark:text-zinc-300">{diff.label}</span>
+      <span className="flex items-center gap-1.5 text-xs">
+        <span className="text-zinc-400 line-through dark:text-zinc-500">{diff.from}</span>
+        <span className="text-zinc-300 dark:text-zinc-600">→</span>
+        <span className="text-emerald-600 dark:text-emerald-400">{diff.to}</span>
+      </span>
+    </div>
+  );
+}
+
+function ActionDiffRow({ diff }: { diff: ActionDiff }) {
+  if (diff.kind !== "modified") {
+    const removing = diff.kind === "removed";
+    return (
+      <div className="flex items-center gap-2 text-sm">
+        <span
+          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+            removing
+              ? "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300"
+              : "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300"
+          }`}
+        >
+          {removing ? "Remove" : "Add"}
+        </span>
+        <span className="text-zinc-600 dark:text-zinc-300">{diff.label}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="rounded-md border border-zinc-200 px-2.5 py-1.5 dark:border-zinc-800">
+      <div className="mb-1 flex items-center gap-2 text-sm">
+        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+          Modify
+        </span>
+        <span className="font-medium text-zinc-700 dark:text-zinc-200">{diff.label}</span>
+      </div>
+      <div className="flex flex-col gap-0.5 pl-1">
+        {diff.changes.map((change) => (
+          <div key={change.label} className="flex items-center gap-1.5 text-xs">
+            <span className="w-16 shrink-0 capitalize text-zinc-400 dark:text-zinc-500">{change.label}</span>
+            <span className="truncate text-zinc-400 line-through dark:text-zinc-500">{change.from}</span>
+            <span className="text-zinc-300 dark:text-zinc-600">→</span>
+            <span className="truncate text-emerald-600 dark:text-emerald-400">{change.to}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function ResetModal({
@@ -660,7 +787,8 @@ function ResetModal({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  const diffs = useMemo(() => computeDiffs(config, defaults), [config, defaults]);
+  const fields = useMemo(() => fieldDiffs(config, defaults), [config, defaults]);
+  const actions = useMemo(() => actionDiffs(config, defaults), [config, defaults]);
   return (
     <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 p-6">
       <div className="w-full max-w-md rounded-lg bg-white shadow-xl dark:bg-zinc-900">
@@ -674,22 +802,34 @@ function ResetModal({
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="max-h-72 overflow-y-auto px-5 py-3">
-          <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">
-            These settings will change back to their defaults:
+        <div className="flex max-h-80 flex-col gap-4 overflow-y-auto px-5 py-3">
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            These will change back to their defaults:
           </p>
-          <div className="flex flex-col gap-1.5">
-            {diffs.map((diff) => (
-              <div key={diff.label} className="flex items-center justify-between gap-2 text-sm">
-                <span className="text-zinc-600 dark:text-zinc-300">{diff.label}</span>
-                <span className="flex items-center gap-1.5 text-xs">
-                  <span className="text-zinc-400 line-through dark:text-zinc-500">{diff.from}</span>
-                  <span className="text-zinc-300 dark:text-zinc-600">→</span>
-                  <span className="text-emerald-600 dark:text-emerald-400">{diff.to}</span>
-                </span>
+          {fields.length > 0 && (
+            <section>
+              <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                Settings
+              </h3>
+              <div className="flex flex-col gap-1.5">
+                {fields.map((diff) => (
+                  <FieldDiffRow key={diff.label} diff={diff} />
+                ))}
               </div>
-            ))}
-          </div>
+            </section>
+          )}
+          {actions.length > 0 && (
+            <section>
+              <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+                Actions
+              </h3>
+              <div className="flex flex-col gap-2">
+                {actions.map((diff, index) => (
+                  <ActionDiffRow key={`${diff.kind}-${diff.label}-${index}`} diff={diff} />
+                ))}
+              </div>
+            </section>
+          )}
         </div>
         <div className="flex justify-end gap-2 border-t border-zinc-200 px-5 py-3 dark:border-zinc-800">
           <button

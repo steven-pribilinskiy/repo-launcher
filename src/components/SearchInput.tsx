@@ -17,7 +17,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
           type="text"
           value={value}
           onChange={(event) => onChange(event.target.value)}
-          placeholder={isLoading ? "Loading repos..." : "Search repos..."}
+          placeholder="Search repos…"
           autoFocus
           className="w-full bg-transparent text-sm text-zinc-900 placeholder-zinc-400 outline-none dark:text-zinc-100 dark:placeholder-zinc-500"
           spellCheck={false}
