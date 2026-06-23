@@ -71,8 +71,26 @@ export function useKeyboardNav({ results, onActionComplete }: UseKeyboardNavOpti
         return;
       }
 
-      for (const action of config?.actions ?? []) {
-        if (!action.enabled) continue;
+      const enabled = (config?.actions ?? []).filter((action) => action.enabled);
+
+      // Enter → primary, Alt+Enter → alternative (role-based, independent of each
+      // action's own hotkey). Falls back to a literal Enter/Alt+Enter hotkey for
+      // configs predating roles.
+      if (event.key === "Enter" && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+        const wantsAlt = event.altKey;
+        const role = wantsAlt ? "alternative" : "primary";
+        const literal = wantsAlt ? "Alt+Enter" : "Enter";
+        const action =
+          enabled.find((item) => item.role === role) ??
+          enabled.find((item) => item.hotkey === literal);
+        if (action) {
+          event.preventDefault();
+          void runAction(action);
+          return;
+        }
+      }
+
+      for (const action of enabled) {
         if (matchHotkey(action.hotkey, event)) {
           event.preventDefault();
           void runAction(action);

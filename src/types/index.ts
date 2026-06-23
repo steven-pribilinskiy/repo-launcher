@@ -7,17 +7,26 @@ export type Repo = {
 
 export type ActionKind = "clipboard" | "exec";
 
+export type ActionRole = "primary" | "alternative";
+
 export type ActionDef = {
   id: string;
   label: string;
-  /** "Enter" marks the primary action; "" = unbound. */
+  /** The action's own custom hotkey; "" = unbound. */
   hotkey: string;
   enabled: boolean;
   kind: ActionKind;
+  /** "primary" fires on Enter, "alternative" on Alt+Enter; independent of hotkey. */
+  role?: ActionRole | null;
   template?: string | null;
   program?: string | null;
   args?: string[] | null;
   platforms?: string[] | null;
+};
+
+export type BuildInfo = {
+  version: string;
+  built_unix: number;
 };
 
 export type AppConfig = {
@@ -29,6 +38,7 @@ export type AppConfig = {
   theme: string;
   auto_restart_on_update: boolean;
   notify_on_update: boolean;
+  remember_position: boolean;
   actions: ActionDef[];
 };
 

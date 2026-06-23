@@ -9,6 +9,29 @@ use super::config::load_config;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[derive(Serialize)]
+pub struct BuildInfo {
+    pub version: String,
+    /// Unix seconds the executable was built (its on-disk modified time).
+    pub built_unix: u64,
+}
+
+/// Version + build time (from the executable's mtime), for the settings footer.
+#[tauri::command]
+pub fn app_build_info() -> BuildInfo {
+    let built_unix = std::env::current_exe()
+        .ok()
+        .and_then(|path| std::fs::metadata(path).ok())
+        .and_then(|meta| meta.modified().ok())
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|dur| dur.as_secs())
+        .unwrap_or(0);
+    BuildInfo {
+        version: VERSION.to_string(),
+        built_unix,
+    }
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct UpdateState {
     last_version: Option<String>,

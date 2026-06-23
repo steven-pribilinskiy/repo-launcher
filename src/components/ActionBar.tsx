@@ -20,6 +20,12 @@ function Kbd({ children }: { children: ReactNode }) {
   );
 }
 
+function triggerLabel(action: ActionDef): string {
+  if (action.role === "primary") return "Enter";
+  if (action.role === "alternative") return "Alt+Enter";
+  return action.hotkey || "·";
+}
+
 // The bar doubles as the window's drag handle: empty areas (the elements carrying
 // data-tauri-drag-region) move the window; the buttons inside stay clickable.
 export function ActionBar({
@@ -46,7 +52,7 @@ export function ActionBar({
             title={action.label}
             className="flex items-center gap-1 rounded px-1 py-0.5 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60"
           >
-            <Kbd>{action.hotkey || "·"}</Kbd>
+            <Kbd>{triggerLabel(action)}</Kbd>
             <span className="text-[11px] text-zinc-500 dark:text-zinc-400">{action.label}</span>
           </button>
         ))}

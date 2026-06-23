@@ -27,6 +27,9 @@ pub struct ActionDef {
     #[serde(default = "default_true")]
     pub enabled: bool,
     pub kind: ActionKind,
+    /// "primary" (Enter) or "alternative" (Alt+Enter); independent of `hotkey`.
+    #[serde(default)]
+    pub role: Option<String>,
     #[serde(default)]
     pub template: Option<String>,
     #[serde(default)]
@@ -109,6 +112,7 @@ fn clipboard(id: &str, label: &str, hotkey: &str, enabled: bool, template: &str)
         hotkey: hotkey.to_string(),
         enabled,
         kind: ActionKind::Clipboard,
+        role: None,
         template: Some(template.to_string()),
         program: None,
         args: None,
@@ -123,6 +127,7 @@ fn exec(id: &str, label: &str, hotkey: &str, enabled: bool, program: &str, args:
         hotkey: hotkey.to_string(),
         enabled,
         kind: ActionKind::Exec,
+        role: None,
         template: None,
         program: Some(program.to_string()),
         args: Some(args.iter().map(|arg| arg.to_string()).collect()),
@@ -135,10 +140,12 @@ fn exec(id: &str, label: &str, hotkey: &str, enabled: bool, program: &str, args:
 /// (VS Code / Cursor / Zed) ship present-but-disabled.
 pub fn default_actions() -> Vec<ActionDef> {
     let mut actions = vec![
-        clipboard("copy-abs", "Copy absolute path", "Enter", true, "{winpath}"),
+        clipboard("copy-abs", "Copy absolute path", "", true, "{winpath}"),
         clipboard("copy-wsl", "Copy WSL path", "Alt+P", true, "{wslpath}"),
         clipboard("copy-name", "Copy folder name", "Alt+N", true, "{name}"),
     ];
+    // The primary action fires on Enter (role-based, independent of any custom hotkey).
+    actions[0].role = Some("primary".to_string());
 
     #[cfg(target_os = "windows")]
     {
@@ -230,4 +237,10 @@ pub fn reset_config(app: AppHandle) -> Result<AppConfig, String> {
     let config = AppConfig::default();
     save_config_to_file(&app, &config)?;
     Ok(config)
+}
+
+/// The default config, without persisting it — used to preview a reset.
+#[tauri::command]
+pub fn default_config() -> AppConfig {
+    AppConfig::default()
 }

@@ -140,6 +140,8 @@ fn main() {
             commands::config::get_config,
             commands::config::save_config,
             commands::config::reset_config,
+            commands::config::default_config,
+            commands::update::app_build_info,
             commands::window_state::reset_window_geometry,
         ])
         .run(tauri::generate_context!())
