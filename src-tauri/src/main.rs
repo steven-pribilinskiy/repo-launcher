@@ -69,14 +69,18 @@ fn main() {
             // REPO_LAUNCHER_NO_AUTOHIDE keeps the popup open when it loses focus;
             // REPO_LAUNCHER_SHOW_ON_START opens it at launch. Both help on
             // environments without a system tray or a working global hotkey.
-            let autohide = std::env::var_os("REPO_LAUNCHER_NO_AUTOHIDE").is_none();
+            let autohide_enabled = std::env::var_os("REPO_LAUNCHER_NO_AUTOHIDE").is_none();
             if let Some(window) = app.get_webview_window("main") {
                 let handle = window.clone();
                 window.on_window_event(move |event| match event {
-                    // Save geometry on focus loss (precedes every hide), then hide.
+                    // Save geometry on focus loss (precedes every hide), then hide —
+                    // but never during first-run onboarding.
                     WindowEvent::Focused(false) => {
                         commands::window_state::persist(&handle);
-                        if autohide {
+                        let onboarded = load_config(handle.app_handle())
+                            .map(|cfg| cfg.onboarded)
+                            .unwrap_or(true);
+                        if autohide_enabled && onboarded {
                             let _ = handle.hide();
                         }
                     }
@@ -88,7 +92,9 @@ fn main() {
                     }
                     _ => {}
                 });
-                if std::env::var_os("REPO_LAUNCHER_SHOW_ON_START").is_some() {
+                // Show at launch for the demo flag, or on first run so the user sees
+                // the onboarding (they don't know the hotkey yet).
+                if std::env::var_os("REPO_LAUNCHER_SHOW_ON_START").is_some() || !config.onboarded {
                     commands::window_state::restore(&window, config.remember_position);
                     let _ = window.show();
                     let _ = window.set_focus();

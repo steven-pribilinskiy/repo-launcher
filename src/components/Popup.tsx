@@ -6,6 +6,7 @@ import { ActionBar } from "@/components/ActionBar";
 import { useRepoSearch } from "@/hooks/useRepoSearch";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { useRepoStore } from "@/stores/repoStore";
+import { Onboarding } from "@/components/Onboarding";
 import { api } from "@/lib/api";
 import { applyTheme } from "@/lib/theme";
 
@@ -57,6 +58,10 @@ export default function Popup() {
       unlisten.then((fn) => fn());
     };
   }, []);
+
+  if (config && !config.onboarded) {
+    return <Onboarding config={config} onDone={() => loadConfig()} />;
+  }
 
   return (
     <div className="flex h-screen flex-col rounded-xl bg-white/95 backdrop-blur-xl dark:bg-zinc-900/95">

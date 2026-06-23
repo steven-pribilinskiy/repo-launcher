@@ -70,6 +70,9 @@ pub struct AppConfig {
     /// Remember the popup's last position across launches (size is always kept).
     #[serde(default = "default_true")]
     pub remember_position: bool,
+    /// Whether the first-launch onboarding has been completed.
+    #[serde(default)]
+    pub onboarded: bool,
     /// The configurable action registry.
     #[serde(default = "default_actions")]
     pub actions: Vec<ActionDef>,
@@ -100,6 +103,7 @@ impl Default for AppConfig {
             auto_restart_on_update: true,
             notify_on_update: true,
             remember_position: true,
+            onboarded: false,
             actions: default_actions(),
         }
     }
