@@ -9,19 +9,24 @@ import {
   MoreVertical,
   Plus,
   RotateCcw,
+  Trash2,
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { applyTheme } from "@/lib/theme";
 import { formatBytes, timeAgo } from "@/lib/format";
-import type {
-  ActionDef,
-  ActionKind,
-  ActionRole,
-  AppConfig,
-  BuildInfo,
-  DataInfo,
-  PathStat,
+import {
+  AGENT_HARNESSES,
+  type ActionDef,
+  type ActionGroup,
+  type ActionKind,
+  type ActionRole,
+  type AgentHarness,
+  type AppConfig,
+  type BuildInfo,
+  type DataInfo,
+  type PathStat,
+  type TerminalKind,
 } from "@/types";
 
 const inputCls =
@@ -30,11 +35,22 @@ const labelCls = "text-xs font-medium text-zinc-500 dark:text-zinc-400";
 const PLACEHOLDERS = ["{path}", "{wslpath}", "{winpath}", "{name}", "{distro}", "{vscode_uri}"];
 
 type Tab = "general" | "actions" | "updates" | "data";
+type ResetScope = { general: boolean; actions: boolean };
 
 let nextId = 0;
 function freshActionId() {
   nextId += 1;
   return `custom-${nextId}`;
+}
+
+let nextGroupId = 0;
+function freshGroupId() {
+  nextGroupId += 1;
+  return `group-${nextGroupId}`;
+}
+
+function harnessGroupTitle(harness: AgentHarness): string {
+  return `Agent harness: ${AGENT_HARNESSES[harness].label}`;
 }
 
 export default function Settings() {
@@ -112,13 +128,32 @@ export default function Settings() {
     setConfig({ ...config, ...changes });
   };
 
-  const applyDefaults = () => {
+  const applyDefaults = (scope: ResetScope) => {
     if (!defaults) return;
     dirty.current = true;
     // Keep onboarded so resetting settings doesn't re-trigger the welcome screen.
-    setConfig({ ...defaults, onboarded: config.onboarded });
-    applyTheme(defaults.theme);
-    api.updateHotkey(defaults.hotkey).catch(() => {});
+    const next: AppConfig = { ...config };
+    if (scope.general) {
+      next.hotkey = defaults.hotkey;
+      next.theme = defaults.theme;
+      next.wsl_distro = defaults.wsl_distro;
+      next.cache_path = defaults.cache_path;
+      next.rebuild_command = defaults.rebuild_command;
+      next.cache_ttl_seconds = defaults.cache_ttl_seconds;
+      next.remember_position = defaults.remember_position;
+      next.auto_restart_on_update = defaults.auto_restart_on_update;
+      next.notify_on_update = defaults.notify_on_update;
+      next.preferred_terminal = defaults.preferred_terminal;
+    }
+    if (scope.actions) {
+      next.actions = defaults.actions;
+      next.groups = defaults.groups;
+    }
+    setConfig(next);
+    if (scope.general) {
+      applyTheme(next.theme);
+      api.updateHotkey(next.hotkey).catch(() => {});
+    }
     setResetOpen(false);
   };
 
@@ -165,7 +200,11 @@ export default function Settings() {
         {tab === "general" && <GeneralTab config={config} distros={distros} patch={patch} />}
         {tab === "updates" && <UpdatesTab config={config} patch={patch} />}
         {tab === "actions" && (
-          <ActionsTab actions={config.actions} onChange={(actions) => patch({ actions })} />
+          <ActionsTab
+            actions={config.actions}
+            groups={config.groups}
+            onChange={(changes) => patch(changes)}
+          />
         )}
         {tab === "data" && <DataTab />}
       </div>
@@ -233,6 +272,17 @@ function GeneralTab({
           <option value="system">System</option>
           <option value="light">Light</option>
           <option value="dark">Dark</option>
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className={labelCls}>Preferred terminal (agent harness)</span>
+        <select
+          className={inputCls}
+          value={config.preferred_terminal}
+          onChange={(event) => patch({ preferred_terminal: event.target.value as TerminalKind })}
+        >
+          <option value="wt">Windows Terminal</option>
+          <option value="tabby">Tabby</option>
         </select>
       </label>
       <label className="flex flex-col gap-1">
@@ -451,12 +501,16 @@ function DataTab() {
 
 // ── Actions tab (table + drag-and-drop + kebab) ───────────────────────────────
 
+type ActionsChange = { actions?: ActionDef[]; groups?: ActionGroup[] };
+
 function ActionsTab({
   actions,
+  groups,
   onChange,
 }: {
   actions: ActionDef[];
-  onChange: (actions: ActionDef[]) => void;
+  groups: ActionGroup[];
+  onChange: (changes: ActionsChange) => void;
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -475,11 +529,14 @@ function ActionsTab({
     };
   }, [kebab]);
 
+  const setActions = (next: ActionDef[]) => onChange({ actions: next });
+  const setGroups = (next: ActionGroup[]) => onChange({ groups: next });
+
   const patchAction = (index: number, changes: Partial<ActionDef>) =>
-    onChange(actions.map((action, current) => (current === index ? { ...action, ...changes } : action)));
+    setActions(actions.map((action, current) => (current === index ? { ...action, ...changes } : action)));
 
   const setRole = (index: number, role: ActionRole | null) =>
-    onChange(
+    setActions(
       actions.map((action, current) => {
         if (current === index) return { ...action, role };
         // A role is unique — clear it from whoever else held it.
@@ -488,46 +545,179 @@ function ActionsTab({
       }),
     );
 
-  const removeAction = (index: number) => onChange(actions.filter((_, current) => current !== index));
+  const removeAction = (index: number) => setActions(actions.filter((_, current) => current !== index));
 
-  const addAction = () =>
-    onChange([
-      ...actions,
-      {
+  const newActionForGroup = (group: ActionGroup | null): ActionDef => {
+    if (group?.kind === "agent") {
+      return {
         id: freshActionId(),
-        label: "New action",
+        label: "New agent command",
         hotkey: "",
         enabled: true,
-        kind: "exec",
+        kind: "agent",
         role: null,
-        program: "",
-        args: [],
+        program: null,
+        args: null,
         template: null,
         platforms: null,
-      },
-    ]);
+        group: group.id,
+        agentFlags: "",
+      };
+    }
+    return {
+      id: freshActionId(),
+      label: "New action",
+      hotkey: "",
+      enabled: true,
+      kind: "exec",
+      role: null,
+      program: "",
+      args: [],
+      template: null,
+      platforms: null,
+      group: group ? group.id : null,
+      agentFlags: null,
+    };
+  };
+
+  const addAction = () => setActions([...actions, newActionForGroup(null)]);
+
+  const addActionToGroup = (group: ActionGroup) => {
+    const created = newActionForGroup(group);
+    setActions([...actions, created]);
+    setEditingId(created.id);
+  };
+
+  const addPresetGroup = () => {
+    const group: ActionGroup = {
+      id: freshGroupId(),
+      title: harnessGroupTitle("claude"),
+      kind: "agent",
+      harness: "claude",
+      dangerous: true,
+      terminal: null,
+    };
+    onChange({ groups: [...groups, group], actions: [...actions, newActionForGroup(group)] });
+  };
+
+  const setGroupHarness = (id: string, harness: AgentHarness) =>
+    setGroups(groups.map((group) => (group.id === id ? { ...group, harness, title: harnessGroupTitle(harness) } : group)));
+
+  const patchGroup = (id: string, changes: Partial<ActionGroup>) =>
+    setGroups(groups.map((group) => (group.id === id ? { ...group, ...changes } : group)));
+
+  const deleteGroup = (id: string) =>
+    onChange({ groups: groups.filter((group) => group.id !== id), actions: actions.filter((action) => action.group !== id) });
 
   const reorder = (from: number, to: number) => {
     if (from === to) return;
     const next = [...actions];
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
-    onChange(next);
+    setActions(next);
   };
+
+  const indexed = actions.map((action, index) => ({ action, index }));
+  const knownGroupIds = new Set(groups.map((group) => group.id));
+  const ungrouped = indexed.filter(({ action }) => !action.group || !knownGroupIds.has(action.group));
+
+  const renderRow = ({ action, index }: { action: ActionDef; index: number }) => (
+    <div key={action.id}>
+      <div
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={() => {
+          if (dragIndex !== null) reorder(dragIndex, index);
+          setDragIndex(null);
+        }}
+        className={`grid grid-cols-[24px_36px_1fr_110px_84px_28px] items-center gap-2 border-b border-zinc-100 px-2 py-1.5 last:border-b-0 dark:border-zinc-800/60 ${
+          dragIndex === index ? "opacity-50" : ""
+        }`}
+      >
+        <span
+          draggable
+          onDragStart={(event) => {
+            setDragIndex(index);
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", String(index));
+          }}
+          onDragEnd={() => setDragIndex(null)}
+          className="cursor-grab text-zinc-300 dark:text-zinc-600"
+          title="Drag to reorder"
+        >
+          <GripVertical className="h-4 w-4" />
+        </span>
+        <input
+          type="checkbox"
+          checked={action.enabled}
+          onChange={(event) => patchAction(index, { enabled: event.target.checked })}
+          className="h-4 w-4 accent-indigo-600"
+          title="Enabled"
+        />
+        <button
+          type="button"
+          onClick={() => setEditingId(editingId === action.id ? null : action.id)}
+          className="flex items-center gap-1.5 truncate text-left text-sm hover:text-indigo-600 dark:hover:text-indigo-400"
+          title="Edit details"
+        >
+          <ChevronDown
+            className={`h-3.5 w-3.5 shrink-0 text-zinc-400 transition-transform ${
+              editingId === action.id ? "rotate-180" : ""
+            }`}
+          />
+          <span className="truncate">{action.label || "(unnamed)"}</span>
+        </button>
+        <TriggerBadge action={action} />
+        <span className="text-xs capitalize text-zinc-500 dark:text-zinc-400">{action.kind}</span>
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            const rect = event.currentTarget.getBoundingClientRect();
+            setKebab(
+              kebab?.index === index
+                ? null
+                : { index, top: rect.bottom + 4, right: window.innerWidth - rect.right },
+            );
+          }}
+          className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+          title="More"
+        >
+          <MoreVertical className="h-4 w-4" />
+        </button>
+      </div>
+      {editingId === action.id && (
+        <ActionEditor
+          action={action}
+          group={groups.find((group) => group.id === action.group) ?? null}
+          groups={groups}
+          onChange={(changes) => patchAction(index, changes)}
+        />
+      )}
+    </div>
+  );
 
   return (
     <div className="max-w-3xl">
       <div className="mb-2 flex items-center justify-between">
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          Drag to reorder. Unchecked actions are hidden and their hotkey is ignored.
+          Drag to reorder within a group. Unchecked actions are hidden and their hotkey is ignored.
         </p>
-        <button
-          type="button"
-          onClick={addAction}
-          className="flex items-center gap-1 rounded-md border border-zinc-300 px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
-          <Plus className="h-3.5 w-3.5" /> Add action
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={addPresetGroup}
+            className="flex items-center gap-1 rounded-md border border-zinc-300 px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            <Plus className="h-3.5 w-3.5" /> Add agent group
+          </button>
+          <button
+            type="button"
+            onClick={addAction}
+            className="flex items-center gap-1 rounded-md border border-zinc-300 px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            <Plus className="h-3.5 w-3.5" /> Add action
+          </button>
+        </div>
       </div>
 
       <div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800">
@@ -539,75 +729,33 @@ function ActionsTab({
           <span>Type</span>
           <span />
         </div>
-        {actions.map((action, index) => (
-          <div key={action.id}>
-            <div
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={() => {
-                if (dragIndex !== null) reorder(dragIndex, index);
-                setDragIndex(null);
-              }}
-              className={`grid grid-cols-[24px_36px_1fr_110px_84px_28px] items-center gap-2 border-b border-zinc-100 px-2 py-1.5 last:border-b-0 dark:border-zinc-800/60 ${
-                dragIndex === index ? "opacity-50" : ""
-              }`}
-            >
-              <span
-                draggable
-                onDragStart={(event) => {
-                  setDragIndex(index);
-                  event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData("text/plain", String(index));
-                }}
-                onDragEnd={() => setDragIndex(null)}
-                className="cursor-grab text-zinc-300 dark:text-zinc-600"
-                title="Drag to reorder"
-              >
-                <GripVertical className="h-4 w-4" />
-              </span>
-              <input
-                type="checkbox"
-                checked={action.enabled}
-                onChange={(event) => patchAction(index, { enabled: event.target.checked })}
-                className="h-4 w-4 accent-indigo-600"
-                title="Enabled"
+        {groups.map((group) => {
+          const items = indexed.filter(({ action }) => action.group === group.id);
+          // Hide empty plain groups (e.g. a stale default group from an older
+          // config); agent groups always show so they stay configurable.
+          if (group.kind !== "agent" && items.length === 0) return null;
+          return (
+            <div key={group.id}>
+              <GroupHeader
+                group={group}
+                onAdd={() => addActionToGroup(group)}
+                onDelete={() => deleteGroup(group.id)}
+                onHarness={(harness) => setGroupHarness(group.id, harness)}
+                onDangerous={(dangerous) => patchGroup(group.id, { dangerous })}
+                onTerminal={(terminal) => patchGroup(group.id, { terminal })}
               />
-              <button
-                type="button"
-                onClick={() => setEditingId(editingId === action.id ? null : action.id)}
-                className="flex items-center gap-1.5 truncate text-left text-sm hover:text-indigo-600 dark:hover:text-indigo-400"
-                title="Edit details"
-              >
-                <ChevronDown
-                  className={`h-3.5 w-3.5 shrink-0 text-zinc-400 transition-transform ${
-                    editingId === action.id ? "rotate-180" : ""
-                  }`}
-                />
-                <span className="truncate">{action.label || "(unnamed)"}</span>
-              </button>
-              <TriggerBadge action={action} />
-              <span className="text-xs capitalize text-zinc-500 dark:text-zinc-400">{action.kind}</span>
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  const rect = event.currentTarget.getBoundingClientRect();
-                  setKebab(
-                    kebab?.index === index
-                      ? null
-                      : { index, top: rect.bottom + 4, right: window.innerWidth - rect.right },
-                  );
-                }}
-                className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                title="More"
-              >
-                <MoreVertical className="h-4 w-4" />
-              </button>
+              {items.map(renderRow)}
             </div>
-            {editingId === action.id && (
-              <ActionEditor action={action} onChange={(changes) => patchAction(index, changes)} />
-            )}
-          </div>
-        ))}
+          );
+        })}
+        {ungrouped.length > 0 && (
+          <>
+            <div className="border-b border-zinc-200 bg-zinc-50/60 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 dark:border-zinc-800 dark:bg-zinc-800/30 dark:text-zinc-500">
+              Ungrouped
+            </div>
+            {ungrouped.map(renderRow)}
+          </>
+        )}
       </div>
       <p className="mt-2 text-[11px] text-zinc-400 dark:text-zinc-500">
         Placeholders: {PLACEHOLDERS.join("  ")}
@@ -710,17 +858,150 @@ function KebabItem({
   );
 }
 
+const headerSelectCls =
+  "rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 outline-none focus:border-indigo-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200";
+
+function GroupHeader({
+  group,
+  onAdd,
+  onDelete,
+  onHarness,
+  onDangerous,
+  onTerminal,
+}: {
+  group: ActionGroup;
+  onAdd: () => void;
+  onDelete: () => void;
+  onHarness: (harness: AgentHarness) => void;
+  onDangerous: (dangerous: boolean) => void;
+  onTerminal: (terminal: TerminalKind | null) => void;
+}) {
+  const isAgent = group.kind === "agent";
+  const meta = AGENT_HARNESSES[(group.harness ?? "claude") as AgentHarness];
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-zinc-200 bg-zinc-50/80 px-2.5 py-1.5 dark:border-zinc-800 dark:bg-zinc-800/40">
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+        {group.title}
+      </span>
+      {isAgent && (
+        <>
+          <select
+            className={headerSelectCls}
+            value={group.harness ?? "claude"}
+            onChange={(event) => onHarness(event.target.value as AgentHarness)}
+            title="Agent harness"
+          >
+            <option value="claude">Claude Code</option>
+            <option value="codex">Codex</option>
+            <option value="gemini">Gemini</option>
+          </select>
+          <label
+            className="flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400"
+            title={meta.dangerous}
+          >
+            <input
+              type="checkbox"
+              checked={group.dangerous !== false}
+              onChange={(event) => onDangerous(event.target.checked)}
+              className="h-3.5 w-3.5 accent-indigo-600"
+            />
+            Dangerous flag
+          </label>
+          <select
+            className={headerSelectCls}
+            value={group.terminal ?? ""}
+            onChange={(event) => onTerminal(event.target.value ? (event.target.value as TerminalKind) : null)}
+            title="Terminal for this group"
+          >
+            <option value="">Terminal: default</option>
+            <option value="wt">Windows Terminal</option>
+            <option value="tabby">Tabby</option>
+          </select>
+        </>
+      )}
+      <div className="ml-auto flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onAdd}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-zinc-500 hover:bg-zinc-200/60 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-700/60 dark:hover:text-zinc-200"
+        >
+          <Plus className="h-3.5 w-3.5" /> Add
+        </button>
+        {isAgent && (
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Delete group"
+            className="rounded p-1 text-zinc-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/40 dark:hover:text-red-400"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ActionEditor({
   action,
+  group,
+  groups,
   onChange,
 }: {
   action: ActionDef;
+  group: ActionGroup | null;
+  groups: ActionGroup[];
   onChange: (changes: Partial<ActionDef>) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, []);
+
+  if (action.kind === "agent") {
+    const meta = AGENT_HARNESSES[(group?.harness ?? "claude") as AgentHarness];
+    const dangerous = group?.dangerous !== false;
+    const preview = [meta.cli, dangerous ? meta.dangerous : "", action.agentFlags ?? ""]
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .join(" ");
+    return (
+      <div
+        ref={ref}
+        className="grid grid-cols-2 gap-3 border-b border-zinc-100 bg-zinc-50 px-4 py-3 dark:border-zinc-800/60 dark:bg-zinc-800/30"
+      >
+        <label className="flex flex-col gap-1">
+          <span className={labelCls}>Label</span>
+          <input
+            className={inputCls}
+            value={action.label}
+            onChange={(event) => onChange({ label: event.target.value })}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className={labelCls}>Custom hotkey</span>
+          <HotkeyInput value={action.hotkey} onChange={(hotkey) => onChange({ hotkey })} />
+        </label>
+        <label className="col-span-2 flex flex-col gap-1">
+          <span className={labelCls}>Extra flags</span>
+          <input
+            className={inputCls}
+            value={action.agentFlags ?? ""}
+            onChange={(event) => onChange({ agentFlags: event.target.value })}
+            placeholder="--resume --model opus"
+          />
+        </label>
+        <div className="col-span-2 flex flex-col gap-1">
+          <span className={labelCls}>Runs (in the group's terminal at the repo)</span>
+          <code className="block break-all rounded-md bg-zinc-100 px-2.5 py-1.5 font-mono text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+            {preview}
+          </code>
+        </div>
+      </div>
+    );
+  }
+
+  const plainGroups = groups.filter((candidate) => candidate.kind !== "agent");
   return (
     <div
       ref={ref}
@@ -749,7 +1030,21 @@ function ActionEditor({
           <option value="exec">Exec (run a program)</option>
         </select>
       </label>
-      <div />
+      <label className="flex flex-col gap-1">
+        <span className={labelCls}>Group</span>
+        <select
+          className={inputCls}
+          value={action.group ?? ""}
+          onChange={(event) => onChange({ group: event.target.value || null })}
+        >
+          <option value="">Ungrouped</option>
+          {plainGroups.map((candidate) => (
+            <option key={candidate.id} value={candidate.id}>
+              {candidate.title}
+            </option>
+          ))}
+        </select>
+      </label>
       {action.kind === "clipboard" ? (
         <label className="col-span-2 flex flex-col gap-1">
           <span className={labelCls}>Copies (template)</span>
@@ -806,6 +1101,7 @@ function fieldDiffs(config: AppConfig, defaults: AppConfig): FieldDiff[] {
   const fields: [string, keyof AppConfig][] = [
     ["Global hotkey", "hotkey"],
     ["Theme", "theme"],
+    ["Preferred terminal", "preferred_terminal"],
     ["WSL distro", "wsl_distro"],
     ["Cache path", "cache_path"],
     ["Rebuild command", "rebuild_command"],
@@ -912,6 +1208,31 @@ function ActionDiffRow({ diff }: { diff: ActionDiff }) {
   );
 }
 
+function ScopeHeader({
+  title,
+  note,
+  checked,
+  onChange,
+}: {
+  title: string;
+  note?: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="mb-1.5 flex items-center gap-2">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-3.5 w-3.5 accent-indigo-600"
+      />
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400">{title}</span>
+      {note && <span className="text-[11px] normal-case text-zinc-400 dark:text-zinc-500">{note}</span>}
+    </label>
+  );
+}
+
 function ResetModal({
   config,
   defaults,
@@ -920,11 +1241,13 @@ function ResetModal({
 }: {
   config: AppConfig;
   defaults: AppConfig;
-  onConfirm: () => void;
+  onConfirm: (scope: ResetScope) => void;
   onCancel: () => void;
 }) {
   const fields = useMemo(() => fieldDiffs(config, defaults), [config, defaults]);
   const actions = useMemo(() => actionDiffs(config, defaults), [config, defaults]);
+  const [scope, setScope] = useState<ResetScope>({ general: true, actions: true });
+  const nothingSelected = !scope.general && !scope.actions;
   return (
     <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 p-6">
       <div className="w-full max-w-md rounded-lg bg-white shadow-xl dark:bg-zinc-900">
@@ -940,14 +1263,16 @@ function ResetModal({
         </div>
         <div className="flex max-h-80 flex-col gap-4 overflow-y-auto px-5 py-3">
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            These will change back to their defaults:
+            Choose what to reset. Only the checked sections change back to their defaults:
           </p>
           {fields.length > 0 && (
             <section>
-              <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
-                Settings
-              </h3>
-              <div className="flex flex-col gap-1.5">
+              <ScopeHeader
+                title="General settings"
+                checked={scope.general}
+                onChange={(value) => setScope((current) => ({ ...current, general: value }))}
+              />
+              <div className={`flex flex-col gap-1.5 ${scope.general ? "" : "opacity-40"}`}>
                 {fields.map((diff) => (
                   <FieldDiffRow key={diff.label} diff={diff} />
                 ))}
@@ -956,10 +1281,13 @@ function ResetModal({
           )}
           {actions.length > 0 && (
             <section>
-              <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
-                Actions
-              </h3>
-              <div className="flex flex-col gap-2">
+              <ScopeHeader
+                title="Actions"
+                note="(includes groups)"
+                checked={scope.actions}
+                onChange={(value) => setScope((current) => ({ ...current, actions: value }))}
+              />
+              <div className={`flex flex-col gap-2 ${scope.actions ? "" : "opacity-40"}`}>
                 {actions.map((diff, index) => (
                   <ActionDiffRow key={`${diff.kind}-${diff.label}-${index}`} diff={diff} />
                 ))}
@@ -977,8 +1305,9 @@ function ResetModal({
           </button>
           <button
             type="button"
-            onClick={onConfirm}
-            className="rounded-md bg-red-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-red-500"
+            disabled={nothingSelected}
+            onClick={() => onConfirm(scope)}
+            className="rounded-md bg-red-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Reset
           </button>

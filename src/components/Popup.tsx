@@ -150,6 +150,7 @@ export default function Popup() {
       )}
       <ActionBar
         actions={config?.actions ?? []}
+        groups={config?.groups ?? []}
         onRun={runAction}
         onCycleSort={cycleSort}
         onOpenSettings={() => api.openSettings()}

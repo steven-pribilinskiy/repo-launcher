@@ -7,9 +7,26 @@ export type Repo = {
   last_used: number;
 };
 
-export type ActionKind = "clipboard" | "exec";
+export type ActionKind = "clipboard" | "exec" | "agent";
 
 export type ActionRole = "primary" | "alternative";
+
+export type AgentHarness = "claude" | "codex" | "gemini";
+export type TerminalKind = "wt" | "tabby";
+export type GroupKind = "plain" | "agent";
+
+/** A header-bearing group of actions. Agent groups carry harness settings. */
+export type ActionGroup = {
+  id: string;
+  title: string;
+  kind: GroupKind;
+  /** Agent groups: which CLI harness backs the group's actions. */
+  harness?: AgentHarness | null;
+  /** Agent groups: append the harness's dangerous-permissions flag. */
+  dangerous?: boolean | null;
+  /** Agent groups: terminal override; null = use config.preferred_terminal. */
+  terminal?: TerminalKind | null;
+};
 
 export type ActionDef = {
   id: string;
@@ -24,6 +41,17 @@ export type ActionDef = {
   program?: string | null;
   args?: string[] | null;
   platforms?: string[] | null;
+  /** Group id this action belongs to; null/undefined = ungrouped. */
+  group?: string | null;
+  /** Agent actions: extra flags appended after `{cli} {dangerousFlag}`. */
+  agentFlags?: string | null;
+};
+
+/** Display + command metadata per harness. Mirror of `agent_cli()` in repos.rs. */
+export const AGENT_HARNESSES: Record<AgentHarness, { label: string; cli: string; dangerous: string }> = {
+  claude: { label: "Claude Code", cli: "claude", dangerous: "--dangerously-skip-permissions" },
+  codex: { label: "Codex", cli: "codex", dangerous: "--dangerously-bypass-approvals-and-sandbox" },
+  gemini: { label: "Gemini", cli: "gemini", dangerous: "--yolo" },
 };
 
 export type BuildInfo = {
@@ -71,6 +99,9 @@ export type AppConfig = {
   remember_position: boolean;
   onboarded: boolean;
   actions: ActionDef[];
+  groups: ActionGroup[];
+  /** Default terminal for agent-harness launches ("wt" | "tabby"). */
+  preferred_terminal: TerminalKind;
 };
 
 export type FuzzyResult = {

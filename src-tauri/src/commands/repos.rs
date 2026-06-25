@@ -110,6 +110,48 @@ fn basename(path: &str) -> String {
         .to_string()
 }
 
+/// CLI binary + dangerous-permissions flag per agent harness.
+/// Mirror of `AGENT_HARNESSES` in src/types/index.ts — keep in sync.
+fn agent_cli(harness: &str) -> (&'static str, &'static str) {
+    match harness {
+        "codex" => ("codex", "--dangerously-bypass-approvals-and-sandbox"),
+        "gemini" => ("gemini", "--yolo"),
+        _ => ("claude", "--dangerously-skip-permissions"),
+    }
+}
+
+/// Build the (program, args) that launch `inner` (a shell command) in a terminal
+/// at the repo. `inner` already includes the CLI + flags. Windows runs it inside
+/// the WSL distro; other OSes run it in a login shell at the path.
+#[cfg(target_os = "windows")]
+fn build_agent_terminal_cmd(terminal: &str, distro: &str, wslpath: &str, inner: &str) -> (String, Vec<String>) {
+    // `exec bash` keeps the tab open after the agent exits.
+    let shell_cmd = format!("{}; exec bash", inner);
+    let parts: Vec<&str> = match terminal {
+        "tabby" => vec![
+            "/c", "start", "", "%LOCALAPPDATA%\\Programs\\Tabby\\Tabby.exe", "run", "--",
+            "wsl.exe", "-d", distro, "--cd", wslpath, "--", "bash", "-lic", &shell_cmd,
+        ],
+        _ => vec![
+            "-w", "0", "nt", "wsl.exe", "-d", distro, "--cd", wslpath, "--", "bash", "-lic", &shell_cmd,
+        ],
+    };
+    let program = if terminal == "tabby" { "cmd" } else { "wt.exe" };
+    (program.to_string(), parts.into_iter().map(String::from).collect())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn build_agent_terminal_cmd(_terminal: &str, _distro: &str, wslpath: &str, inner: &str) -> (String, Vec<String>) {
+    // Best-effort on non-Windows: run in a login shell at the repo path.
+    let shell_cmd = format!("cd {} && {}; exec bash", shell_quote(wslpath), inner);
+    ("bash".to_string(), vec!["-lic".to_string(), shell_cmd])
+}
+
+#[cfg(not(target_os = "windows"))]
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 /// Substitute action placeholders for the selected repo.
 fn substitute(template: &str, repo: &Repo) -> String {
     template
@@ -128,6 +170,8 @@ fn substitute(template: &str, repo: &Repo) -> String {
 /// Records usage in the shared goto-repo history regardless.
 #[tauri::command]
 pub fn run_action(app: AppHandle, action: ActionDef, repo: Repo) -> Result<Option<String>, String> {
+    let config = load_config(&app).ok();
+
     let result = match action.kind {
         ActionKind::Clipboard => {
             let template = action.template.unwrap_or_default();
@@ -151,10 +195,45 @@ pub fn run_action(app: AppHandle, action: ActionDef, repo: Repo) -> Result<Optio
                 .map_err(|err| format!("Failed to run {}: {}", program, err))?;
             None
         }
+        ActionKind::Agent => {
+            let config = config.as_ref().ok_or("Failed to load config for agent action")?;
+            let group = config
+                .groups
+                .iter()
+                .find(|group| action.group.as_deref() == Some(group.id.as_str()))
+                .ok_or("Agent action has no group")?;
+            let harness = group.harness.as_deref().unwrap_or("claude");
+            let (cli, dangerous_flag) = agent_cli(harness);
+
+            let mut inner = cli.to_string();
+            if group.dangerous.unwrap_or(true) {
+                inner.push(' ');
+                inner.push_str(dangerous_flag);
+            }
+            if let Some(flags) = action.agent_flags.as_deref() {
+                let flags = flags.trim();
+                if !flags.is_empty() {
+                    inner.push(' ');
+                    inner.push_str(flags);
+                }
+            }
+
+            let terminal = group
+                .terminal
+                .clone()
+                .filter(|term| !term.trim().is_empty())
+                .unwrap_or_else(|| config.preferred_terminal.clone());
+            let (program, args) = build_agent_terminal_cmd(&terminal, &repo.distro, &repo.path, &inner);
+            Command::new(&program)
+                .args(&args)
+                .spawn()
+                .map_err(|err| format!("Failed to launch agent ({}): {}", program, err))?;
+            None
+        }
     };
 
-    if let Ok(config) = load_config(&app) {
-        let _ = append_history(&config, &repo.path);
+    if let Some(config) = &config {
+        let _ = append_history(config, &repo.path);
     }
 
     Ok(result)

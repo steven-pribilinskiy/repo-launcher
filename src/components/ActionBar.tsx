@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { GripVertical, List as ListIcon, Settings as SettingsIcon, Table2 } from "lucide-react";
 import { SORT_LABELS } from "@/types";
-import type { ActionDef } from "@/types";
+import type { ActionDef, ActionGroup } from "@/types";
 
 // Drag the window by any non-button part of the bar (the grip on the left is the
 // visible cue). begin_window_move locks the size against FancyZones/aero-snap and
@@ -17,6 +17,7 @@ function startWindowDrag(event: React.MouseEvent) {
 
 type ActionBarProps = {
   actions: ActionDef[];
+  groups: ActionGroup[];
   onRun: (action: ActionDef) => void;
   onCycleSort: () => void;
   onOpenSettings: () => void;
@@ -42,8 +43,31 @@ function triggerLabel(action: ActionDef): string {
 
 // The bar doubles as the window's drag handle: empty areas (the elements carrying
 // data-tauri-drag-region) move the window; the buttons inside stay clickable.
+function ChipGrid({ items, onRun }: { items: ActionDef[]; onRun: (action: ActionDef) => void }) {
+  return (
+    // Columns hug their content (longest title) instead of splitting 50/50.
+    <div className="grid grid-cols-[max-content_max-content] gap-x-6 gap-y-0.5">
+      {items.map((action) => (
+        <button
+          key={action.id}
+          type="button"
+          onClick={() => onRun(action)}
+          title={action.label}
+          className="flex items-center gap-1.5 rounded px-1 py-0.5 text-left hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60"
+        >
+          <span className="w-16 shrink-0">
+            <Kbd>{triggerLabel(action)}</Kbd>
+          </span>
+          <span className="whitespace-nowrap text-[11px] text-zinc-500 dark:text-zinc-400">{action.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ActionBar({
   actions,
+  groups,
   onRun,
   onCycleSort,
   onOpenSettings,
@@ -53,6 +77,11 @@ export function ActionBar({
   onToggleView,
 }: ActionBarProps) {
   const enabled = actions.filter((action) => action.enabled);
+  const knownGroupIds = new Set(groups.map((group) => group.id));
+  const ungrouped = enabled.filter((action) => !action.group || !knownGroupIds.has(action.group));
+  const grouped = groups
+    .map((group) => ({ group, items: enabled.filter((action) => action.group === group.id) }))
+    .filter((section) => section.items.length > 0);
 
   return (
     <div
@@ -65,21 +94,15 @@ export function ActionBar({
       >
         <GripVertical className="h-4 w-4" />
       </div>
-      {/* Columns hug their content (longest title) instead of splitting 50/50. */}
-      <div className="grid grid-cols-[max-content_max-content] gap-x-6 gap-y-0.5">
-        {enabled.map((action) => (
-          <button
-            key={action.id}
-            type="button"
-            onClick={() => onRun(action)}
-            title={action.label}
-            className="flex items-center gap-1.5 rounded px-1 py-0.5 text-left hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60"
-          >
-            <span className="w-16 shrink-0">
-              <Kbd>{triggerLabel(action)}</Kbd>
+      <div className="flex flex-col gap-1.5">
+        {ungrouped.length > 0 && <ChipGrid items={ungrouped} onRun={onRun} />}
+        {grouped.map(({ group, items }) => (
+          <div key={group.id} className="flex flex-col gap-0.5">
+            <span className="text-[9px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-600">
+              {group.title}
             </span>
-            <span className="whitespace-nowrap text-[11px] text-zinc-500 dark:text-zinc-400">{action.label}</span>
-          </button>
+            <ChipGrid items={items} onRun={onRun} />
+          </div>
         ))}
       </div>
       <div className="ml-auto flex flex-col items-end gap-1">

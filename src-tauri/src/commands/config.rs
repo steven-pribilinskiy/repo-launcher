@@ -12,6 +12,8 @@ pub enum ActionKind {
     Clipboard,
     /// Spawn a program with substituted args.
     Exec,
+    /// Launch an agent CLI (resolved from its group's harness) in a terminal.
+    Agent,
 }
 
 /// A single folder action. The action whose `hotkey` is "Enter" is the primary
@@ -39,6 +41,31 @@ pub struct ActionDef {
     /// Restrict to these OSes ("windows"/"linux"/"macos"). None = all.
     #[serde(default)]
     pub platforms: Option<Vec<String>>,
+    /// Group id this action belongs to; None = ungrouped.
+    #[serde(default)]
+    pub group: Option<String>,
+    /// Agent actions: extra flags appended after `{cli} {dangerousFlag}`.
+    #[serde(default, rename = "agentFlags")]
+    pub agent_flags: Option<String>,
+}
+
+/// A header-bearing group of actions. Agent groups carry harness settings that
+/// drive how their `Agent`-kind actions are launched.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionGroup {
+    pub id: String,
+    pub title: String,
+    /// "plain" | "agent".
+    pub kind: String,
+    /// Agent groups: "claude" | "codex" | "gemini".
+    #[serde(default)]
+    pub harness: Option<String>,
+    /// Agent groups: append the harness's dangerous-permissions flag.
+    #[serde(default)]
+    pub dangerous: Option<bool>,
+    /// Agent groups: "wt" | "tabby"; None = use `preferred_terminal`.
+    #[serde(default)]
+    pub terminal: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +103,12 @@ pub struct AppConfig {
     /// The configurable action registry.
     #[serde(default = "default_actions")]
     pub actions: Vec<ActionDef>,
+    /// Action groups (headers + agent-harness settings).
+    #[serde(default = "default_groups")]
+    pub groups: Vec<ActionGroup>,
+    /// Default terminal for agent-harness launches ("wt" | "tabby").
+    #[serde(default = "default_terminal")]
+    pub preferred_terminal: String,
 }
 
 fn default_true() -> bool {
@@ -89,6 +122,9 @@ fn default_ttl() -> u64 {
 }
 fn default_theme() -> String {
     "system".to_string()
+}
+fn default_terminal() -> String {
+    "wt".to_string()
 }
 
 impl Default for AppConfig {
@@ -105,11 +141,19 @@ impl Default for AppConfig {
             remember_position: true,
             onboarded: false,
             actions: default_actions(),
+            groups: default_groups(),
+            preferred_terminal: default_terminal(),
         }
     }
 }
 
-fn clipboard(id: &str, label: &str, hotkey: &str, enabled: bool, template: &str) -> ActionDef {
+// Group ids shared between default_groups() and default_actions().
+const GRP_COPY: &str = "grp-copy";
+const GRP_TERMINALS: &str = "grp-terminals";
+const GRP_EDITORS: &str = "grp-editors";
+const GRP_AGENT_CLAUDE: &str = "grp-agent-claude";
+
+fn clipboard(id: &str, label: &str, hotkey: &str, enabled: bool, group: &str, template: &str) -> ActionDef {
     ActionDef {
         id: id.to_string(),
         label: label.to_string(),
@@ -121,10 +165,12 @@ fn clipboard(id: &str, label: &str, hotkey: &str, enabled: bool, template: &str)
         program: None,
         args: None,
         platforms: None,
+        group: Some(group.to_string()),
+        agent_flags: None,
     }
 }
 
-fn exec(id: &str, label: &str, hotkey: &str, enabled: bool, program: &str, args: &[&str]) -> ActionDef {
+fn exec(id: &str, label: &str, hotkey: &str, enabled: bool, group: &str, program: &str, args: &[&str]) -> ActionDef {
     ActionDef {
         id: id.to_string(),
         label: label.to_string(),
@@ -136,76 +182,122 @@ fn exec(id: &str, label: &str, hotkey: &str, enabled: bool, program: &str, args:
         program: Some(program.to_string()),
         args: Some(args.iter().map(|arg| arg.to_string()).collect()),
         platforms: None,
+        group: Some(group.to_string()),
+        agent_flags: None,
     }
 }
 
+fn agent(id: &str, label: &str, hotkey: &str, enabled: bool, group: &str, flags: &str) -> ActionDef {
+    ActionDef {
+        id: id.to_string(),
+        label: label.to_string(),
+        hotkey: hotkey.to_string(),
+        enabled,
+        kind: ActionKind::Agent,
+        role: None,
+        template: None,
+        program: None,
+        args: None,
+        platforms: None,
+        group: Some(group.to_string()),
+        agent_flags: Some(flags.to_string()),
+    }
+}
+
+/// Built-in default action groups. Ids are shared with `default_actions()`.
+pub fn default_groups() -> Vec<ActionGroup> {
+    vec![
+        ActionGroup { id: GRP_COPY.into(), title: "Copy".into(), kind: "plain".into(), harness: None, dangerous: None, terminal: None },
+        ActionGroup { id: GRP_TERMINALS.into(), title: "Terminals".into(), kind: "plain".into(), harness: None, dangerous: None, terminal: None },
+        ActionGroup { id: GRP_EDITORS.into(), title: "Editors".into(), kind: "plain".into(), harness: None, dangerous: None, terminal: None },
+        ActionGroup {
+            id: GRP_AGENT_CLAUDE.into(),
+            title: "Agent harness: Claude Code".into(),
+            kind: "agent".into(),
+            harness: Some("claude".into()),
+            dangerous: Some(true),
+            terminal: None,
+        },
+    ]
+}
+
 /// Built-in default actions, per OS. All editable/removable in settings.
-/// Enabled-by-default: the copy actions + the Windows openers. The editors
-/// (VS Code / Cursor / Zed) ship present-but-disabled.
+/// Enabled-by-default: the copy actions + the Windows openers + the agent
+/// launchers. The editors (VS Code / Cursor / Zed) ship present-but-disabled.
 pub fn default_actions() -> Vec<ActionDef> {
     // Primary (Enter) copies the POSIX path (/home/...) — what's pasted most in a
     // WSL workflow. The Windows UNC path is a separate Alt+P action on Windows.
-    let mut actions = vec![clipboard("copy-path", "Copy path", "", true, "{wslpath}")];
+    let mut actions = vec![clipboard("copy-path", "Copy path", "", true, GRP_COPY, "{wslpath}")];
     actions[0].role = Some("primary".to_string());
 
     #[cfg(target_os = "windows")]
-    actions.push(clipboard("copy-win", "Copy Windows path", "Alt+P", true, "{winpath}"));
+    actions.push(clipboard("copy-win", "Copy Windows path", "Alt+P", true, GRP_COPY, "{winpath}"));
 
-    actions.push(clipboard("copy-name", "Copy folder name", "Alt+N", true, "{name}"));
+    actions.push(clipboard("copy-name", "Copy folder name", "Alt+N", true, GRP_COPY, "{name}"));
 
     #[cfg(target_os = "windows")]
     {
         // Tabby isn't on PATH; launch it from its standard per-user install dir via
-        // cmd (which expands %LOCALAPPDATA%). `Tabby.exe open <dir>` opens a shell there.
+        // cmd (which expands %LOCALAPPDATA%). `tabby open <dir>` only sets the cwd of
+        // the *default* profile, which can't cd into a \\wsl.localhost UNC path — so
+        // run a WSL shell explicitly via `tabby run`. The `--` stops Tabby's yargs
+        // from treating `-d` as its own --debug flag.
         actions.push(exec(
             "tabby",
             "Open in Tabby",
-            "Alt+B",
+            "Alt+T",
             true,
+            GRP_TERMINALS,
             "cmd",
-            &["/c", "start", "", "%LOCALAPPDATA%\\Programs\\Tabby\\Tabby.exe", "open", "{winpath}"],
+            &["/c", "start", "", "%LOCALAPPDATA%\\Programs\\Tabby\\Tabby.exe", "run", "--", "wsl.exe", "-d", "{distro}", "--cd", "{wslpath}"],
         ));
         // `-w 0 nt` opens a new TAB in the current Windows Terminal window (or a new
         // window if none). Terminal uses the WSL profile; WSL shell runs wsl directly.
         actions.push(exec(
             "wt",
             "Open in Windows Terminal",
-            "Alt+T",
+            "Alt+W",
             true,
+            GRP_TERMINALS,
             "wt.exe",
             &["-w", "0", "nt", "-p", "{distro}", "-d", "{winpath}"],
         ));
-        actions.push(exec("explorer", "Open in explorer.exe", "Alt+E", true, "explorer.exe", &["{winpath}"]));
+        actions.push(exec("explorer", "Open in explorer.exe", "Alt+E", true, GRP_TERMINALS, "explorer.exe", &["{winpath}"]));
         actions.push(exec(
             "wsl-shell",
             "Open WSL shell here",
             "Alt+S",
             true,
+            GRP_TERMINALS,
             "wt.exe",
             &["-w", "0", "nt", "wsl.exe", "-d", "{distro}", "--cd", "{wslpath}"],
         ));
-        actions.push(exec("vscode", "Open in VS Code", "Alt+V", false, "cmd", &["/c", "code", "--folder-uri", "{vscode_uri}"]));
-        actions.push(exec("cursor", "Open in Cursor", "Alt+R", false, "cmd", &["/c", "cursor", "--folder-uri", "{vscode_uri}"]));
-        actions.push(exec("zed", "Open in Zed", "Alt+Z", false, "cmd", &["/c", "zed", "{winpath}"]));
+        actions.push(exec("vscode", "Open in VS Code", "Alt+V", false, GRP_EDITORS, "cmd", &["/c", "code", "--folder-uri", "{vscode_uri}"]));
+        actions.push(exec("cursor", "Open in Cursor", "Alt+R", false, GRP_EDITORS, "cmd", &["/c", "cursor", "--folder-uri", "{vscode_uri}"]));
+        actions.push(exec("zed", "Open in Zed", "Alt+Z", false, GRP_EDITORS, "cmd", &["/c", "zed", "{winpath}"]));
     }
 
     #[cfg(target_os = "linux")]
     {
-        actions.push(exec("terminal", "Open terminal here", "Alt+T", true, "x-terminal-emulator", &["--working-directory", "{path}"]));
-        actions.push(exec("files", "Open file manager", "Alt+E", true, "xdg-open", &["{path}"]));
-        actions.push(exec("vscode", "Open in VS Code", "Alt+V", false, "code", &["{path}"]));
-        actions.push(exec("cursor", "Open in Cursor", "Alt+R", false, "cursor", &["{path}"]));
-        actions.push(exec("zed", "Open in Zed", "Alt+Z", false, "zed", &["{path}"]));
+        actions.push(exec("terminal", "Open terminal here", "Alt+W", true, GRP_TERMINALS, "x-terminal-emulator", &["--working-directory", "{path}"]));
+        actions.push(exec("files", "Open file manager", "Alt+E", true, GRP_TERMINALS, "xdg-open", &["{path}"]));
+        actions.push(exec("vscode", "Open in VS Code", "Alt+V", false, GRP_EDITORS, "code", &["{path}"]));
+        actions.push(exec("cursor", "Open in Cursor", "Alt+R", false, GRP_EDITORS, "cursor", &["{path}"]));
+        actions.push(exec("zed", "Open in Zed", "Alt+Z", false, GRP_EDITORS, "zed", &["{path}"]));
     }
 
     #[cfg(target_os = "macos")]
     {
-        actions.push(exec("terminal", "Open terminal here", "Alt+T", true, "open", &["-a", "Terminal", "{path}"]));
-        actions.push(exec("finder", "Open in Finder", "Alt+E", true, "open", &["{path}"]));
-        actions.push(exec("vscode", "Open in VS Code", "Alt+V", false, "code", &["{path}"]));
-        actions.push(exec("cursor", "Open in Cursor", "Alt+R", false, "cursor", &["{path}"]));
-        actions.push(exec("zed", "Open in Zed", "Alt+Z", false, "zed", &["{path}"]));
+        actions.push(exec("terminal", "Open terminal here", "Alt+W", true, GRP_TERMINALS, "open", &["-a", "Terminal", "{path}"]));
+        actions.push(exec("finder", "Open in Finder", "Alt+E", true, GRP_TERMINALS, "open", &["{path}"]));
+        actions.push(exec("vscode", "Open in VS Code", "Alt+V", false, GRP_EDITORS, "code", &["{path}"]));
+        actions.push(exec("cursor", "Open in Cursor", "Alt+R", false, GRP_EDITORS, "cursor", &["{path}"]));
+        actions.push(exec("zed", "Open in Zed", "Alt+Z", false, GRP_EDITORS, "zed", &["{path}"]));
     }
+
+    // Agent harness launchers (Claude Code). Run the CLI in a terminal at the repo.
+    actions.push(agent("agent-claude", "Claude Code", "Alt+C", true, GRP_AGENT_CLAUDE, ""));
+    actions.push(agent("agent-claude-resume", "Claude — resume", "Alt+Shift+C", true, GRP_AGENT_CLAUDE, "--resume"));
 
     actions
 }
