@@ -17,7 +17,14 @@ export function useRepoSearch(query: string, repos: Repo[]): FuzzyResult[] {
       }
     }
 
-    results.sort((a, b) => b.score - a.score);
+    // Ties (the matcher can score two repos equally) fall back to usage, then
+    // recency, so the repo you actually open ranks first.
+    results.sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.repo.uses - a.repo.uses ||
+        b.repo.last_used - a.repo.last_used,
+    );
     return results;
   }, [query, repos]);
 }
