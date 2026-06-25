@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SearchInput } from "@/components/SearchInput";
 import { RepoList } from "@/components/RepoList";
 import { RepoTable, type TableSort, type TableSortColumn } from "@/components/RepoTable";
 import { ActionBar } from "@/components/ActionBar";
+import { ResizeHandles } from "@/components/ResizeHandles";
 import { useRepoSearch } from "@/hooks/useRepoSearch";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { useRepoStore } from "@/stores/repoStore";
@@ -13,6 +15,16 @@ import { applyTheme } from "@/lib/theme";
 import { repoName } from "@/lib/utils";
 
 type View = "list" | "table";
+
+// Keep the caret in the search field no matter where you click. preventDefault on
+// mousedown stops buttons / the list / drag handles from taking focus, so typing keeps
+// working after any interaction. The input itself (and any text field) is exempt so it
+// can focus and select text normally.
+function keepSearchFocused(event: React.MouseEvent) {
+  const target = event.target as HTMLElement;
+  if (target.closest("input, textarea, [contenteditable=true]")) return;
+  event.preventDefault();
+}
 
 export default function Popup() {
   const [query, setQuery] = useState("");
@@ -99,12 +111,26 @@ export default function Popup() {
     };
   }, []);
 
+  // Keep the search field usable: whenever the window regains focus (after a drag,
+  // alt-tab, etc.) put the caret back in the search input.
+  useEffect(() => {
+    const unlisten = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+      if (focused) inputRef.current?.focus();
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   if (config && !config.onboarded) {
     return <Onboarding config={config} onDone={() => loadConfig()} />;
   }
 
   return (
-    <div className="flex h-screen flex-col rounded-xl bg-white/95 backdrop-blur-xl dark:bg-zinc-900/95">
+    <div
+      onMouseDown={keepSearchFocused}
+      className="relative flex h-screen flex-col rounded-xl bg-white/95 backdrop-blur-xl dark:bg-zinc-900/95"
+    >
       <SearchInput ref={inputRef} value={query} onChange={setQuery} isLoading={isLoading} />
       {view === "table" ? (
         <RepoTable
@@ -132,6 +158,7 @@ export default function Popup() {
         view={view}
         onToggleView={toggleView}
       />
+      <ResizeHandles />
     </div>
   );
 }

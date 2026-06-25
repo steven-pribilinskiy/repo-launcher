@@ -1,11 +1,21 @@
 import { forwardRef } from "react";
-import { Search, X } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { GripVertical, Search, X } from "lucide-react";
 
 type SearchInputProps = {
   value: string;
   onChange: (value: string) => void;
   isLoading: boolean;
 };
+
+// The drag handle lives on the right of the search row. begin_window_move locks the
+// size against FancyZones/aero-snap and refreshes the auto-hide timer before the drag.
+function startMove(event: React.MouseEvent) {
+  if (event.button !== 0) return;
+  void invoke("begin_window_move").catch(() => {});
+  void getCurrentWindow().startDragging();
+}
 
 export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
   ({ value, onChange, isLoading }, ref) => {
@@ -37,6 +47,14 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
             <X className="h-3.5 w-3.5" />
           </button>
         )}
+        <div
+          onMouseDown={startMove}
+          title="Drag to move"
+          aria-label="Drag to move window"
+          className="flex h-5 w-5 shrink-0 cursor-grab items-center justify-center text-zinc-300 active:cursor-grabbing dark:text-zinc-600"
+        >
+          <GripVertical className="h-4 w-4" />
+        </div>
       </div>
     );
   },

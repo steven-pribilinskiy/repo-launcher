@@ -6,11 +6,12 @@
     <meta name="color-scheme" content="light dark" />
     <title>Repo Launcher</title>
     <script>
-      // Anti-flash: match the system theme before render. The app overrides this
-      // once the saved theme loads (lib/theme.ts).
-      if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-        document.documentElement.classList.add("dark");
-      }
+      // Anti-flash: match the system theme (class + color-scheme) before the first
+      // paint, so the webview canvas isn't a white flash on dark theme. The app
+      // refines this once the saved theme loads (lib/theme.ts).
+      var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.classList.toggle("dark", prefersDark);
+      document.documentElement.style.colorScheme = prefersDark ? "dark" : "light";
     </script>
   </head>
   <body>

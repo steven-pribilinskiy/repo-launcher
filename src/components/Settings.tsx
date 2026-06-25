@@ -91,10 +91,13 @@ export default function Settings() {
     return () => window.removeEventListener("keydown", onKey);
   }, [resetOpen]);
 
-  const isDefault = useMemo(
-    () => (config && defaults ? JSON.stringify(config) === JSON.stringify(defaults) : true),
-    [config, defaults],
-  );
+  // Compare ignoring `onboarded` — it's a state flag, not a resettable setting, so
+  // a completed onboarding shouldn't make "Reset to defaults" appear.
+  const isDefault = useMemo(() => {
+    if (!config || !defaults) return true;
+    const strip = (value: AppConfig) => JSON.stringify({ ...value, onboarded: false });
+    return strip(config) === strip(defaults);
+  }, [config, defaults]);
 
   if (!config) {
     return (
@@ -112,7 +115,8 @@ export default function Settings() {
   const applyDefaults = () => {
     if (!defaults) return;
     dirty.current = true;
-    setConfig(defaults);
+    // Keep onboarded so resetting settings doesn't re-trigger the welcome screen.
+    setConfig({ ...defaults, onboarded: config.onboarded });
     applyTheme(defaults.theme);
     api.updateHotkey(defaults.hotkey).catch(() => {});
     setResetOpen(false);
@@ -314,6 +318,18 @@ function UpdatesTab({
         onChange={(value) => patch({ notify_on_update: value })}
         label="Show a system notification after an update"
       />
+      <div className="pt-2">
+        <button
+          type="button"
+          onClick={() => patch({ onboarded: false })}
+          className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          Show the welcome screen again
+        </button>
+        <p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+          Appears the next time you open the launcher.
+        </p>
+      </div>
     </div>
   );
 }
@@ -526,8 +542,6 @@ function ActionsTab({
         {actions.map((action, index) => (
           <div key={action.id}>
             <div
-              draggable
-              onDragStart={() => setDragIndex(index)}
               onDragOver={(event) => event.preventDefault()}
               onDrop={() => {
                 if (dragIndex !== null) reorder(dragIndex, index);
@@ -537,7 +551,17 @@ function ActionsTab({
                 dragIndex === index ? "opacity-50" : ""
               }`}
             >
-              <span className="cursor-grab text-zinc-300 dark:text-zinc-600" title="Drag to reorder">
+              <span
+                draggable
+                onDragStart={(event) => {
+                  setDragIndex(index);
+                  event.dataTransfer.effectAllowed = "move";
+                  event.dataTransfer.setData("text/plain", String(index));
+                }}
+                onDragEnd={() => setDragIndex(null)}
+                className="cursor-grab text-zinc-300 dark:text-zinc-600"
+                title="Drag to reorder"
+              >
                 <GripVertical className="h-4 w-4" />
               </span>
               <input

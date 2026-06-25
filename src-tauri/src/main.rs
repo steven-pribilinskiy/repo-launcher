@@ -16,6 +16,11 @@ use tauri::{
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 fn main() {
+    // Make WebView2's pre-paint background transparent (default is opaque white) so the
+    // transparent popup doesn't flash white at the edges when shown. Process-global, read
+    // by WebView2 at controller creation — must be set before any webview exists.
+    std::env::set_var("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "00000000");
+
     env_logger::init();
 
     tauri::Builder::default()
@@ -34,9 +39,12 @@ fn main() {
             let show_item = MenuItemBuilder::with_id("show", "Show").build(app)?;
             let settings_item = MenuItemBuilder::with_id("settings", "Settings").build(app)?;
             let refresh_item = MenuItemBuilder::with_id("refresh", "Refresh Repos").build(app)?;
+            let reload_item = MenuItemBuilder::with_id("reload", "Reload").build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
             let menu = MenuBuilder::new(app)
-                .items(&[&show_item, &settings_item, &refresh_item, &quit_item])
+                .items(&[&show_item, &settings_item, &refresh_item])
+                .separator()
+                .items(&[&reload_item, &quit_item])
                 .build()?;
 
             let _tray = TrayIconBuilder::new()
@@ -52,6 +60,7 @@ fn main() {
                             let _ = window.emit("refresh-repos", ());
                         }
                     }
+                    "reload" => app.restart(),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -73,12 +82,21 @@ fn main() {
             // environments without a system tray or a working global hotkey.
             let autohide_enabled = std::env::var_os("REPO_LAUNCHER_NO_AUTOHIDE").is_none();
             if let Some(window) = app.get_webview_window("main") {
+                // Tool-window style + size-lock subclass so FancyZones / aero-snap can't
+                // snap or resize the frameless popup while the user drags it.
+                commands::window_drag::install_drag_guard(&window);
                 let handle = window.clone();
                 window.on_window_event(move |event| match event {
                     // Track interactions so the focus-race blur (fired right after
                     // showing, or while resizing/moving the frameless window) doesn't
                     // trigger an auto-hide.
-                    WindowEvent::Focused(true) | WindowEvent::Resized(_) | WindowEvent::Moved(_) => {
+                    WindowEvent::Focused(true) => {
+                        commands::window_state::mark_activity();
+                    }
+                    WindowEvent::Resized(_) => {
+                        commands::window_state::mark_activity();
+                    }
+                    WindowEvent::Moved(_) => {
                         commands::window_state::mark_activity();
                     }
                     // Save geometry on focus loss (precedes every hide), then hide —
@@ -88,10 +106,14 @@ fn main() {
                         let onboarded = load_config(handle.app_handle())
                             .map(|cfg| cfg.onboarded)
                             .unwrap_or(true);
-                        if autohide_enabled
-                            && onboarded
-                            && !commands::window_state::recently_active(400)
-                        {
+                        let active = commands::window_state::recently_active(400);
+                        // Don't hide if the cursor is still on/near the window: the blur is
+                        // an edge interaction (grabbing a thin resize border) or a near-miss
+                        // edge click, not a real "click away to dismiss". Prevents the popup
+                        // vanishing when a resize grab lands a pixel outside the zone.
+                        let cursor_over = commands::window_drag::cursor_over_window(&handle, 16);
+                        let hide = autohide_enabled && onboarded && !active && !cursor_over;
+                        if hide {
                             let _ = handle.hide();
                         }
                     }
@@ -103,10 +125,13 @@ fn main() {
                     }
                     _ => {}
                 });
+                // Apply saved geometry to the (still hidden) window on every startup so
+                // a resized window keeps its size/position across restarts. Idempotent
+                // with logical units, so it can't reintroduce the grow loop.
+                commands::window_state::restore(&window, config.remember_position);
                 // Show at launch for the demo flag, or on first run so the user sees
                 // the onboarding (they don't know the hotkey yet).
                 if std::env::var_os("REPO_LAUNCHER_SHOW_ON_START").is_some() || !config.onboarded {
-                    commands::window_state::restore(&window, config.remember_position);
                     commands::window_state::mark_activity();
                     let _ = window.show();
                     let _ = window.set_focus();
@@ -126,20 +151,20 @@ fn main() {
             }
 
             // --- Global shortcut ---
+            // Register via on_shortcut — the same path update_hotkey uses — so the
+            // popup hotkey is only ever bound once. (The previous builder-handler +
+            // register() combo coexisted with update_hotkey's on_shortcut, so the
+            // hotkey fired twice and toggled the window back and forth.)
+            app.handle()
+                .plugin(tauri_plugin_global_shortcut::Builder::new().build())?;
             let hotkey = parse_hotkey(&config.hotkey);
-            let app_handle = app.handle().clone();
-            app.handle().plugin(
-                tauri_plugin_global_shortcut::Builder::new()
-                    .with_handler(move |_app, shortcut, event| {
-                        if shortcut == &hotkey && event.state() == ShortcutState::Pressed {
-                            toggle_window(&app_handle);
-                        }
-                    })
-                    .build(),
-            )?;
-            // Non-fatal: a hotkey conflict (or no grab on Wayland) shouldn't stop
-            // the app — the tray still works.
-            if let Err(error) = app.global_shortcut().register(hotkey) {
+            // Non-fatal: a hotkey conflict (or no grab on Wayland) shouldn't stop the
+            // app — the tray still works.
+            if let Err(error) = app.global_shortcut().on_shortcut(hotkey, |app, _shortcut, event| {
+                if event.state() == ShortcutState::Pressed {
+                    toggle_window(app);
+                }
+            }) {
                 eprintln!("Failed to register global hotkey '{}': {}", config.hotkey, error);
             }
 
@@ -162,6 +187,8 @@ fn main() {
             commands::config::default_config,
             commands::update::app_build_info,
             commands::window_state::reset_window_geometry,
+            commands::window_state::mark_active,
+            commands::window_drag::begin_window_move,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -169,11 +196,20 @@ fn main() {
 
 fn toggle_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        if window.is_visible().unwrap_or(false) {
+        if !commands::window_state::toggle_allowed() {
+            return;
+        }
+        let visible = window.is_visible().unwrap_or(false);
+        if visible {
             let _ = window.hide();
         } else {
+            // The window keeps its size/position across hide/show, so don't re-apply
+            // geometry here (re-applying caused a grow loop). Only re-center when the
+            // user doesn't want the position remembered.
             let remember = load_config(app).map(|cfg| cfg.remember_position).unwrap_or(true);
-            commands::window_state::restore(&window, remember);
+            if !remember {
+                let _ = window.center();
+            }
             commands::window_state::mark_activity();
             let _ = window.show();
             let _ = window.set_focus();

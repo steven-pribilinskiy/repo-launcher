@@ -1,6 +1,6 @@
 [package]
 name = "repo-launcher"
-version = "0.2.0"
+version = "0.3.0"
 description = "Global-hotkey folder launcher over the goto-repo cache"
 edition = "2021"
 
@@ -27,6 +27,9 @@ tokio = { version = "1", features = ["full"] }
 dirs = "5"
 log = "0.4"
 env_logger = "0.11"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Shell"] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
