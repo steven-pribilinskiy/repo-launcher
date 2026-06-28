@@ -311,7 +311,7 @@ pub fn default_actions() -> Vec<ActionDef> {
 
     // Agent harness launchers (Claude Code). Run the CLI in a terminal at the repo.
     actions.push(agent("agent-claude", "Claude Code", "Alt+C", true, GRP_AGENT_CLAUDE, ""));
-    actions.push(agent("agent-claude-resume", "Claude — resume", "Alt+Shift+C", true, GRP_AGENT_CLAUDE, "--resume"));
+    actions.push(agent("agent-claude-resume", "Claude Code — resume", "Alt+Shift+C", true, GRP_AGENT_CLAUDE, "--resume"));
 
     actions
 }

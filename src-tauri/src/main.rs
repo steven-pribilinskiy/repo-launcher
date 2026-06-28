@@ -21,6 +21,15 @@ fn main() {
     // by WebView2 at controller creation — must be set before any webview exists.
     std::env::set_var("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "00000000");
 
+    // Keep the hidden popup's WebView2 rendering instead of being suspended by
+    // occlusion detection — otherwise the first show after it's been hidden (or
+    // after a tray Reload) stalls while the webview wakes up and repaints, which
+    // reads as "the window appears but is unresponsive for a beat".
+    std::env::set_var(
+        "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+        "--disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows",
+    );
+
     tauri::Builder::default()
         // Logging first, so everything below (and the timed startup steps) is captured.
         // Writes to stdout AND a rolling file in the app log dir, surfaced in the
@@ -115,6 +124,7 @@ fn main() {
                         ..
                     } = event
                     {
+                        log::info!("tray: icon click -> toggle_window");
                         toggle_window(tray.app_handle());
                     }
                 })

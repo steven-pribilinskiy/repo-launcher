@@ -27,7 +27,7 @@ pub fn resolve_distro(config: &AppConfig) -> String {
                 .and_then(|distros| distros.into_iter().next())
                 .unwrap_or_else(|| "Ubuntu".to_string());
             log::info!(
-                "resolve_distro: autodetect via `wsl --list` took {} ms -> {}",
+                "resolve_distro: autodetect via WSL registry took {} ms -> {}",
                 start.elapsed().as_millis(),
                 distro
             );

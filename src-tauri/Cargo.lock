@@ -3182,7 +3182,7 @@ dependencies = [
 
 [[package]]
 name = "repo-launcher"
-version = "0.7.3"
+version = "0.8.2"
 dependencies = [
  "dirs 5.0.1",
  "log",
@@ -3198,6 +3198,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tokio",
  "windows-sys 0.59.0",
+ "winreg 0.10.1",
 ]
 
 [[package]]

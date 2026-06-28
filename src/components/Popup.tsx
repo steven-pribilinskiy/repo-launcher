@@ -106,7 +106,14 @@ export default function Popup() {
   // Re-summoned: reset, refocus, reload config (hotkey/actions/theme may have changed).
   useEffect(() => {
     const unlisten = listen("window-shown", () => {
-      api.logEvent(`window-shown at ${Math.round(performance.now())} ms`);
+      // Measure the on-screen repaint latency after show: if the webview was
+      // suspended while hidden, the next animation frame is delayed — that gap is
+      // the "window appears but is unresponsive for a beat".
+      const shownAt = performance.now();
+      api.logEvent(`window-shown at ${Math.round(shownAt)} ms`);
+      requestAnimationFrame(() =>
+        api.logEvent(`post-show repaint +${Math.round(performance.now() - shownAt)} ms`),
+      );
       setQuery("");
       setPaletteOpen(false);
       inputRef.current?.focus();

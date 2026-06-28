@@ -22,34 +22,54 @@ pub struct Repo {
     pub last_used: u64,
 }
 
-/// Detect installed WSL distros via `wsl --list --quiet`.
+/// Installed WSL distros, default first. Reads the WSL registry (`Lxss`) rather
+/// than `wsl --list`, which cold-starts the WSL VM (~5s) — the registry read is
+/// instant and never wakes the VM, so it's safe on the startup hot path.
+#[cfg(target_os = "windows")]
 #[tauri::command]
 pub fn list_distros() -> Result<Vec<String>, String> {
-    let output = Command::new("wsl")
-        .args(["--list", "--quiet"])
-        .output()
-        .map_err(|err| format!("Failed to run wsl: {}", err))?;
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
 
-    if !output.status.success() {
-        return Err(format!(
-            "wsl --list failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
+    let lxss = RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Lxss")
+        .map_err(|err| format!("open Lxss registry: {}", err))?;
+    let default_guid: String = lxss.get_value("DefaultDistribution").unwrap_or_default();
+
+    let mut default_name: Option<String> = None;
+    let mut others: Vec<String> = Vec::new();
+    for guid in lxss.enum_keys().flatten() {
+        let Ok(sub) = lxss.open_subkey(&guid) else { continue };
+        let Ok(name) = sub.get_value::<String, _>("DistributionName") else { continue };
+        if name.to_lowercase().contains("docker") {
+            continue;
+        }
+        if guid.eq_ignore_ascii_case(&default_guid) {
+            default_name = Some(name);
+        } else {
+            others.push(name);
+        }
     }
 
-    let stdout = decode_wsl_output(&output.stdout);
+    let mut result = Vec::new();
+    if let Some(name) = default_name {
+        result.push(name);
+    }
+    result.extend(others);
+    if result.is_empty() {
+        return Err("no WSL distros found in registry".into());
+    }
+    Ok(result)
+}
 
-    let distros: Vec<String> = stdout
-        .lines()
-        .map(|line| line.trim().trim_matches('\0').to_string())
-        .filter(|line| !line.is_empty())
-        .filter(|line| !line.to_lowercase().contains("docker"))
-        .collect();
-
-    Ok(distros)
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+pub fn list_distros() -> Result<Vec<String>, String> {
+    Ok(Vec::new())
 }
 
 /// Decode WSL output which may be UTF-16LE on Windows.
+#[cfg(target_os = "windows")]
 pub fn decode_wsl_output(bytes: &[u8]) -> String {
     if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
         let units: Vec<u16> = bytes[2..]
