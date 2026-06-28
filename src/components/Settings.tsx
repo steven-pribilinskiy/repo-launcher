@@ -141,6 +141,7 @@ export default function Settings() {
       next.rebuild_command = defaults.rebuild_command;
       next.cache_ttl_seconds = defaults.cache_ttl_seconds;
       next.remember_position = defaults.remember_position;
+      next.launch_at_startup = defaults.launch_at_startup;
       next.auto_restart_on_update = defaults.auto_restart_on_update;
       next.notify_on_update = defaults.notify_on_update;
       next.preferred_terminal = defaults.preferred_terminal;
@@ -335,6 +336,12 @@ function GeneralTab({
         checked={config.remember_position}
         onChange={(value) => patch({ remember_position: value })}
         label="Remember the popup's position between launches"
+      />
+      <Toggle
+        className="col-span-2"
+        checked={config.launch_at_startup}
+        onChange={(value) => patch({ launch_at_startup: value })}
+        label="Launch at startup (start automatically when you log in)"
       />
       <div className="col-span-2">
         <button
@@ -1107,6 +1114,7 @@ function fieldDiffs(config: AppConfig, defaults: AppConfig): FieldDiff[] {
     ["Rebuild command", "rebuild_command"],
     ["Cache TTL", "cache_ttl_seconds"],
     ["Remember position", "remember_position"],
+    ["Launch at startup", "launch_at_startup"],
     ["Auto-restart on update", "auto_restart_on_update"],
     ["Notify on update", "notify_on_update"],
   ];

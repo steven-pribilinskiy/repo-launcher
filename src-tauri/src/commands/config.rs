@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::AppHandle;
 use tauri::Manager;
+use tauri_plugin_autostart::ManagerExt;
 
 /// What a folder action does when triggered.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -97,6 +98,9 @@ pub struct AppConfig {
     /// Remember the popup's last position across launches (size is always kept).
     #[serde(default = "default_true")]
     pub remember_position: bool,
+    /// Launch the app automatically when the user logs in.
+    #[serde(default)]
+    pub launch_at_startup: bool,
     /// Whether the first-launch onboarding has been completed.
     #[serde(default)]
     pub onboarded: bool,
@@ -139,6 +143,7 @@ impl Default for AppConfig {
             auto_restart_on_update: true,
             notify_on_update: true,
             remember_position: true,
+            launch_at_startup: false,
             onboarded: false,
             actions: default_actions(),
             groups: default_groups(),
@@ -328,6 +333,21 @@ fn save_config_to_file(app: &AppHandle, config: &AppConfig) -> Result<(), String
     fs::write(&path, content).map_err(|err| err.to_string())
 }
 
+/// Reconcile the OS login-item registration with the desired state. Non-fatal:
+/// a failure to register (e.g. locked-down registry) shouldn't break saving the
+/// config — the rest of the settings still apply.
+pub fn sync_autostart(app: &AppHandle, desired: bool) {
+    let manager = app.autolaunch();
+    let current = manager.is_enabled().unwrap_or(false);
+    if current == desired {
+        return;
+    }
+    let result = if desired { manager.enable() } else { manager.disable() };
+    if let Err(error) = result {
+        log::warn!("Failed to {} autostart: {}", if desired { "enable" } else { "disable" }, error);
+    }
+}
+
 #[tauri::command]
 pub fn get_config(app: AppHandle) -> Result<AppConfig, String> {
     load_config(&app)
@@ -335,13 +355,16 @@ pub fn get_config(app: AppHandle) -> Result<AppConfig, String> {
 
 #[tauri::command]
 pub fn save_config(app: AppHandle, config: AppConfig) -> Result<(), String> {
-    save_config_to_file(&app, &config)
+    save_config_to_file(&app, &config)?;
+    sync_autostart(&app, config.launch_at_startup);
+    Ok(())
 }
 
 #[tauri::command]
 pub fn reset_config(app: AppHandle) -> Result<AppConfig, String> {
     let config = AppConfig::default();
     save_config_to_file(&app, &config)?;
+    sync_autostart(&app, config.launch_at_startup);
     Ok(config)
 }
 

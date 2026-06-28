@@ -85,8 +85,10 @@ on Linux/macOS.
 Open from the tray menu (**Settings**) or the gear in the popup. Configure: the
 global hotkey (re-registered live; default **Alt + Backtick** — the key above Tab), theme
 (System / Light / Dark), the WSL distro that hosts the cache, an optional cache-path
-override, the rebuild command, the cache TTL, the update behavior (auto-restart +
-notification toggles), and the full action registry (enable/reorder/edit/add/remove).
+override, the rebuild command, the cache TTL, **launch at startup** (registers a login
+item so the launcher starts automatically when you log in), the update behavior
+(auto-restart + notification toggles), and the full action registry
+(enable/reorder/edit/add/remove).
 
 Settings persist to the app config dir (`%APPDATA%\com.stevenp.repo-launcher\config.json`
 on Windows). The repo list, sort mode, and history are shared with goto-repo.

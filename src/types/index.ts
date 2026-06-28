@@ -97,6 +97,7 @@ export type AppConfig = {
   auto_restart_on_update: boolean;
   notify_on_update: boolean;
   remember_position: boolean;
+  launch_at_startup: boolean;
   onboarded: boolean;
   actions: ActionDef[];
   groups: ActionGroup[];

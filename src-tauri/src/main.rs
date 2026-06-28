@@ -27,9 +27,14 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::Builder::new().build())
         .setup(|app| {
             let config =
                 load_config(&app.handle()).unwrap_or_else(|_| commands::config::AppConfig::default());
+
+            // Reconcile the OS login item with the saved preference, so a config
+            // edited on disk (or a fresh install) reflects in the registry.
+            commands::config::sync_autostart(&app.handle(), config.launch_at_startup);
 
             // Notify if we were just updated, then watch for the next update.
             commands::update::check_and_notify_update(&app.handle());
