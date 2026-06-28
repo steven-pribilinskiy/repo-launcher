@@ -111,6 +111,10 @@ pub struct AppConfig {
     /// Whether the first-launch onboarding has been completed.
     #[serde(default)]
     pub onboarded: bool,
+    /// One-shot guard: the desktop shortcut has been offered/created once, so it's
+    /// never auto-recreated on later launches (the app, not the installer, owns it).
+    #[serde(default)]
+    pub desktop_shortcut_initialized: bool,
     /// The configurable action registry.
     #[serde(default = "default_actions")]
     pub actions: Vec<ActionDef>,
@@ -154,6 +158,7 @@ impl Default for AppConfig {
             launch_at_startup: true,
             transparency: 0,
             onboarded: false,
+            desktop_shortcut_initialized: false,
             actions: default_actions(),
             groups: default_groups(),
             preferred_terminal: default_terminal(),

@@ -96,9 +96,11 @@ fn wsl_home(distro: &str) -> Result<String, String> {
         return Ok(home.clone());
     }
 
+    use std::os::windows::process::CommandExt;
     let spawn = Instant::now();
     let output = Command::new("wsl")
         .args(["-d", distro, "--", "bash", "-lc", "printf %s \"$HOME\""])
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW — no console flash on startup
         .output()
         .map_err(|err| format!("Failed to query WSL home: {}", err))?;
     log::info!(
@@ -138,6 +140,18 @@ pub fn prime_wsl_cache(app: &AppHandle) {
             config.wsl_home = Some(home);
             changed = true;
         }
+    }
+    // One-shot desktop shortcut: a genuinely fresh install (not yet onboarded) gets
+    // one icon; existing users don't get a surprise. Either way mark it done so it's
+    // never auto-created again — the user owns it via the Settings button afterwards.
+    if !config.desktop_shortcut_initialized {
+        if !config.onboarded {
+            if let Err(error) = super::repos::create_desktop_shortcut() {
+                log::warn!("desktop shortcut: {}", error);
+            }
+        }
+        config.desktop_shortcut_initialized = true;
+        changed = true;
     }
     if changed {
         let _ = super::config::persist_config(app, &config);
@@ -303,6 +317,13 @@ fn run_rebuild(config: &AppConfig, blocking: bool) -> Result<(), String> {
     let (program, args) = parts.split_first().ok_or("Empty rebuild command")?;
     let mut command = Command::new(program);
     command.args(args);
+    // CREATE_NO_WINDOW — the rebuild runs inside WSL; don't flash a console window
+    // (e.g. the background maybe_refresh on a stale cache at startup).
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
     if blocking {
         command
             .output()

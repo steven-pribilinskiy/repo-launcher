@@ -102,6 +102,7 @@ export type AppConfig = {
   launch_at_startup: boolean;
   transparency: number;
   onboarded: boolean;
+  desktop_shortcut_initialized: boolean;
   actions: ActionDef[];
   groups: ActionGroup[];
   /** Default terminal for agent-harness launches ("wt" | "tabby"). */

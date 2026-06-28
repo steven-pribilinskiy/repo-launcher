@@ -66,7 +66,8 @@ fn main() {
             #[cfg(target_os = "windows")]
             {
                 let needs_prime = config.wsl_distro.as_deref().unwrap_or("").trim().is_empty()
-                    || config.wsl_home.as_deref().unwrap_or("").trim().is_empty();
+                    || config.wsl_home.as_deref().unwrap_or("").trim().is_empty()
+                    || !config.desktop_shortcut_initialized;
                 if needs_prime {
                     let handle = app.handle().clone();
                     std::thread::spawn(move || commands::cache::prime_wsl_cache(&handle));
@@ -236,6 +237,7 @@ fn main() {
             data_info,
             run_action,
             commands::repos::open_path,
+            commands::repos::create_desktop_shortcut,
             list_distros,
             open_settings,
             update_hotkey,

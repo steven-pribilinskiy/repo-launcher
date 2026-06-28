@@ -141,7 +141,13 @@ export default function Settings() {
     // Ignore onboarding state and the auto-primed WSL distro/home cache — none of
     // those are user preferences, so they shouldn't make "Reset to defaults" appear.
     const strip = (value: AppConfig) =>
-      JSON.stringify({ ...value, onboarded: false, wsl_distro: null, wsl_home: null });
+      JSON.stringify({
+        ...value,
+        onboarded: false,
+        desktop_shortcut_initialized: false,
+        wsl_distro: null,
+        wsl_home: null,
+      });
     return strip(config) === strip(defaults);
   }, [config, defaults]);
 
@@ -408,7 +414,7 @@ function GeneralTab({
         onChange={(value) => patch({ launch_at_startup: value })}
         label="Launch at startup (start automatically when you log in)"
       />
-      <div className="col-span-2">
+      <div className="col-span-2 flex items-center gap-2">
         <button
           type="button"
           onClick={() => api.resetWindowGeometry()}
@@ -416,7 +422,33 @@ function GeneralTab({
         >
           Reset size &amp; position
         </button>
+        <DesktopShortcutButton />
       </div>
+    </div>
+  );
+}
+
+function DesktopShortcutButton() {
+  const [status, setStatus] = useState<"idle" | "done" | "error">("idle");
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={async () => {
+          try {
+            await api.createDesktopShortcut();
+            setStatus("done");
+          } catch {
+            setStatus("error");
+          }
+          setTimeout(() => setStatus("idle"), 2500);
+        }}
+        className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+      >
+        Create desktop shortcut
+      </button>
+      {status === "done" && <span className="text-xs text-emerald-600 dark:text-emerald-400">Created on desktop</span>}
+      {status === "error" && <span className="text-xs text-red-600 dark:text-red-400">Couldn’t create it</span>}
     </div>
   );
 }

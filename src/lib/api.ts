@@ -48,4 +48,7 @@ export const api = {
 
   /** Write a timing/diagnostic line into the unified log (file + stdout). */
   logEvent: (message: string) => invoke<void>("log_event", { message }).catch(() => {}),
+
+  /** Create (or refresh) a desktop shortcut to the app. Windows only. */
+  createDesktopShortcut: () => invoke<void>("create_desktop_shortcut"),
 };

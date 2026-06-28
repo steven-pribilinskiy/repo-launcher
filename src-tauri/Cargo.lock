@@ -3182,7 +3182,7 @@ dependencies = [
 
 [[package]]
 name = "repo-launcher"
-version = "0.8.2"
+version = "0.8.4"
 dependencies = [
  "dirs 5.0.1",
  "log",

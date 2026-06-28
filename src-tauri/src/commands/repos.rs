@@ -259,6 +259,56 @@ pub fn run_action(app: AppHandle, action: ActionDef, repo: Repo) -> Result<Optio
     Ok(result)
 }
 
+/// Create (or refresh) a desktop shortcut to this executable. Idempotent. The app
+/// owns the desktop shortcut — the installer is kept neutral via installer-hooks.nsh.
+#[tauri::command]
+pub fn create_desktop_shortcut() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        let exe = std::env::current_exe()
+            .map_err(|err| format!("current_exe: {}", err))?
+            .to_string_lossy()
+            .to_string();
+        // Drive a tiny PowerShell script from a temp file (no arg-escaping pitfalls).
+        // The exe path sits in a single-quoted here-string so backslashes/spaces are
+        // literal; `'@` must start its own line (Rust's `\` line-continuation eats
+        // the newline + indentation, leaving `'@` at column 0).
+        // [Environment]::GetFolderPath('Desktop') resolves the REAL desktop, incl.
+        // OneDrive Known-Folder-Move redirection (WScript SpecialFolders can return
+        // the stale classic path). This matches NSIS $DESKTOP, so the button writes
+        // where the icon is actually shown.
+        let script = format!(
+            "$desktop = [Environment]::GetFolderPath('Desktop')\r\n\
+             $w = New-Object -ComObject WScript.Shell\r\n\
+             $lnk = $w.CreateShortcut((Join-Path $desktop 'repo-launcher.lnk'))\r\n\
+             $lnk.TargetPath = @'\r\n{}\r\n'@\r\n\
+             $lnk.Save()\r\n",
+            exe
+        );
+        let script_path = std::env::temp_dir().join("rl-mkshortcut.ps1");
+        std::fs::write(&script_path, script).map_err(|err| format!("write script: {}", err))?;
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+            .arg(&script_path)
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .output()
+            .map_err(|err| format!("powershell: {}", err))?;
+        let _ = std::fs::remove_file(&script_path);
+        if !output.status.success() {
+            return Err(format!(
+                "shortcut creation failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Err("Desktop shortcuts are only supported on Windows".into())
+    }
+}
+
 /// Resolve a path (POSIX or already-Windows) to a Windows path for explorer/start.
 #[cfg(target_os = "windows")]
 fn resolve_win(app: &AppHandle, path: &str) -> String {
