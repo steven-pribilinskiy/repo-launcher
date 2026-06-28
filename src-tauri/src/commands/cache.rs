@@ -51,7 +51,11 @@ fn goto_dirs(config: &AppConfig) -> Result<(PathBuf, PathBuf), String> {
     #[cfg(target_os = "windows")]
     {
         let distro = resolve_distro(config);
-        let home = wsl_home(&distro)?;
+        // Use the cached $HOME when present; only spawn wsl.exe if we must.
+        let home = match config.wsl_home.as_deref() {
+            Some(cached) if !cached.trim().is_empty() => cached.to_string(),
+            _ => wsl_home(&distro)?,
+        };
         let base = format!("\\\\wsl.localhost\\{}", distro);
         let to_unc = |posix: String| -> PathBuf {
             PathBuf::from(format!("{}{}", base, posix.replace('/', "\\")))
@@ -111,6 +115,33 @@ fn wsl_home(distro: &str) -> Result<String, String> {
     }
     cache.lock().unwrap().insert(distro.to_string(), home.clone());
     Ok(home)
+}
+
+/// First-launch priming: detect the WSL distro and $HOME once and persist them to
+/// config, so later launches build the UNC cache path with zero wsl.exe spawns
+/// (each spawn cold-starts the WSL VM — the dominant startup delay). Run off-thread.
+#[cfg(target_os = "windows")]
+pub fn prime_wsl_cache(app: &AppHandle) {
+    let Ok(mut config) = load_config(app) else { return };
+    let mut changed = false;
+    if config.wsl_distro.as_deref().unwrap_or("").trim().is_empty() {
+        if let Ok(Some(distro)) = list_distros().map(|distros| distros.into_iter().next()) {
+            log::info!("startup: caching WSL distro '{}'", distro);
+            config.wsl_distro = Some(distro);
+            changed = true;
+        }
+    }
+    if config.wsl_home.as_deref().unwrap_or("").trim().is_empty() {
+        let distro = resolve_distro(&config);
+        if let Ok(home) = wsl_home(&distro) {
+            log::info!("startup: caching WSL home '{}'", home);
+            config.wsl_home = Some(home);
+            changed = true;
+        }
+    }
+    if changed {
+        let _ = super::config::persist_config(app, &config);
+    }
 }
 
 fn repos_tsv(config: &AppConfig) -> Result<PathBuf, String> {

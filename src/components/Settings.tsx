@@ -134,7 +134,10 @@ export default function Settings() {
   // a completed onboarding shouldn't make "Reset to defaults" appear.
   const isDefault = useMemo(() => {
     if (!config || !defaults) return true;
-    const strip = (value: AppConfig) => JSON.stringify({ ...value, onboarded: false });
+    // Ignore onboarding state and the auto-primed WSL distro/home cache — none of
+    // those are user preferences, so they shouldn't make "Reset to defaults" appear.
+    const strip = (value: AppConfig) =>
+      JSON.stringify({ ...value, onboarded: false, wsl_distro: null, wsl_home: null });
     return strip(config) === strip(defaults);
   }, [config, defaults]);
 
@@ -224,13 +227,6 @@ export default function Settings() {
               <RotateCcw className="h-3.5 w-3.5" /> Reset to defaults
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => getCurrentWindow().hide()}
-            className="rounded-md px-2.5 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            Close
-          </button>
         </div>
       </header>
 
@@ -704,12 +700,16 @@ function ActionsTab({
   // that still carry the old harness's default labels (e.g. "Claude Code" ->
   // "Codex", "Claude Code — resume" -> "Codex — resume"), leaving custom labels.
   const setGroupHarness = (id: string, harness: AgentHarness) => {
-    const group = groups.find((candidate) => candidate.id === id);
-    const oldLabel = AGENT_HARNESSES[(group?.harness ?? "claude") as AgentHarness].label;
     const newLabel = AGENT_HARNESSES[harness].label;
+    // A label is "default" (and should follow the harness) if it's any harness's
+    // base label, or that base + " — resume". Custom labels are left untouched.
+    // Includes the legacy short base "Claude" so older "Claude — resume" labels heal.
+    const knownBases = new Set([...Object.values(AGENT_HARNESSES).map((meta) => meta.label), "Claude"]);
     const remap = (label: string) => {
-      if (label === oldLabel) return newLabel;
-      if (label === `${oldLabel} — resume`) return `${newLabel} — resume`;
+      const trimmed = label.trim();
+      const resume = trimmed.match(/^(.*?)\s*[—-]\s*resume$/i);
+      if (resume && knownBases.has(resume[1])) return `${newLabel} — resume`;
+      if (knownBases.has(trimmed)) return newLabel;
       return label;
     };
     onChange({

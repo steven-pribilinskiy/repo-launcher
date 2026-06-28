@@ -80,6 +80,10 @@ pub struct AppConfig {
     /// Which WSL distro hosts the goto-repo cache (Windows only). None = autodetect.
     #[serde(default)]
     pub wsl_distro: Option<String>,
+    /// Cached WSL $HOME for the resolved distro — avoids a slow wsl.exe spawn on
+    /// every launch (the VM cold-starts otherwise). Primed once on first launch.
+    #[serde(default)]
+    pub wsl_home: Option<String>,
     /// Override the full path to the goto-repo cache dir (containing repos.tsv).
     #[serde(default)]
     pub cache_path: Option<String>,
@@ -140,6 +144,7 @@ impl Default for AppConfig {
             hotkey: default_hotkey(),
             cache_ttl_seconds: default_ttl(),
             wsl_distro: None,
+            wsl_home: None,
             cache_path: None,
             rebuild_command: None,
             theme: default_theme(),
@@ -350,6 +355,13 @@ pub fn sync_autostart(app: &AppHandle, desired: bool) {
     if let Err(error) = result {
         log::warn!("Failed to {} autostart: {}", if desired { "enable" } else { "disable" }, error);
     }
+}
+
+/// Persist a config to disk from non-command Rust (e.g. the startup distro probe).
+/// Windows-only: its sole caller is the WSL-distro persistence on Windows startup.
+#[cfg(target_os = "windows")]
+pub fn persist_config(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+    save_config_to_file(app, config)
 }
 
 #[tauri::command]

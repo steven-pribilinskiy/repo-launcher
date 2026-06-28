@@ -51,6 +51,19 @@ fn main() {
             // edited on disk (or a fresh install) reflects in the registry.
             commands::config::sync_autostart(&app.handle(), config.launch_at_startup);
 
+            // First launch: detect + cache the WSL distro and $HOME off-thread so
+            // every later launch builds the UNC cache path with zero wsl.exe spawns
+            // (each spawn cold-starts the WSL VM — the dominant startup delay).
+            #[cfg(target_os = "windows")]
+            {
+                let needs_prime = config.wsl_distro.as_deref().unwrap_or("").trim().is_empty()
+                    || config.wsl_home.as_deref().unwrap_or("").trim().is_empty();
+                if needs_prime {
+                    let handle = app.handle().clone();
+                    std::thread::spawn(move || commands::cache::prime_wsl_cache(&handle));
+                }
+            }
+
             // Notify if we were just updated, then watch for the next update.
             commands::update::check_and_notify_update(&app.handle());
             commands::update::spawn_restart_watcher(app.handle().clone());

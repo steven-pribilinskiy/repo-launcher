@@ -92,6 +92,7 @@ export type AppConfig = {
   hotkey: string;
   cache_ttl_seconds: number;
   wsl_distro: string | null;
+  wsl_home: string | null;
   cache_path: string | null;
   rebuild_command: string[] | null;
   theme: string;
