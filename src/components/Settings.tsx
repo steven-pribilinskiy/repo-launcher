@@ -83,6 +83,9 @@ export default function Settings() {
   const [build, setBuild] = useState<BuildInfo | null>(null);
   const [tab, setTab] = useState<Tab>("general");
   const [resetOpen, setResetOpen] = useState(false);
+  // Which action's editor is open (lifted so the "unfinished" summary can ignore
+  // the row you're actively filling in).
+  const [editingActionId, setEditingActionId] = useState<string | null>(null);
   const dirty = useRef(false);
 
   useEffect(() => {
@@ -154,7 +157,11 @@ export default function Settings() {
     setConfig({ ...config, ...changes });
   };
 
-  const incompleteCount = countIncomplete(config.actions);
+  // Don't count the action whose editor is open — a just-added row shouldn't nag
+  // before the user has had a chance to give it a hotkey.
+  const incompleteCount = countIncomplete(
+    config.actions.filter((action) => action.id !== editingActionId),
+  );
 
   const applyDefaults = (scope: ResetScope) => {
     if (!defaults) return;
@@ -238,6 +245,8 @@ export default function Settings() {
             actions={config.actions}
             groups={config.groups}
             onChange={(changes) => patch(changes)}
+            editingId={editingActionId}
+            setEditingId={setEditingActionId}
           />
         )}
         {tab === "data" && <DataTab />}
@@ -574,13 +583,16 @@ function ActionsTab({
   actions,
   groups,
   onChange,
+  editingId,
+  setEditingId,
 }: {
   actions: ActionDef[];
   groups: ActionGroup[];
   onChange: (changes: ActionsChange) => void;
+  editingId: string | null;
+  setEditingId: (id: string | null) => void;
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
   // The kebab menu renders in a portal at fixed viewport coords so it's never
   // clipped by the table's overflow.
   const [kebab, setKebab] = useState<{ index: number; top: number; right: number } | null>(null);
@@ -640,7 +652,9 @@ function ActionsTab({
     if (group?.kind === "agent") {
       return {
         id: freshActionId(),
-        label: "New agent command",
+        // Starts as the harness base label; the editor locks that prefix and lets
+        // the user add a distinguishing suffix.
+        label: AGENT_HARNESSES[(group.harness ?? "claude") as AgentHarness].label,
         hotkey: "",
         enabled: true,
         kind: "agent",
@@ -707,8 +721,10 @@ function ActionsTab({
     const knownBases = new Set([...Object.values(AGENT_HARNESSES).map((meta) => meta.label), "Claude"]);
     const remap = (label: string) => {
       const trimmed = label.trim();
-      const resume = trimmed.match(/^(.*?)\s*[—-]\s*resume$/i);
-      if (resume && knownBases.has(resume[1])) return `${newLabel} — resume`;
+      const withSuffix = trimmed.match(/^(.*?)\s*[—-]\s*(.+)$/);
+      if (withSuffix && knownBases.has(withSuffix[1].trim())) {
+        return `${newLabel} — ${withSuffix[2].trim()}`;
+      }
       if (knownBases.has(trimmed)) return newLabel;
       return label;
     };
@@ -741,7 +757,8 @@ function ActionsTab({
   const ungrouped = indexed.filter(({ action }) => !action.group || !knownGroupIds.has(action.group));
 
   const renderRow = ({ action, index }: { action: ActionDef; index: number }) => {
-    const incomplete = actionIncompleteReason(action);
+    // Suppress the warning on the row you're editing — no nagging mid-edit.
+    const incomplete = editingId === action.id ? null : actionIncompleteReason(action);
     return (
     <div key={action.id}>
       <div
@@ -873,7 +890,8 @@ function ActionsTab({
           if (group.kind !== "agent" && items.length === 0) return null;
           const open = isOpen(group.id);
           const incomplete = items.reduce(
-            (total, { action }) => total + (actionIncompleteReason(action) ? 1 : 0),
+            (total, { action }) =>
+              total + (action.id !== editingId && actionIncompleteReason(action) ? 1 : 0),
             0,
           );
           return (
@@ -898,7 +916,8 @@ function ActionsTab({
           (() => {
             const open = isOpen(UNGROUPED_KEY);
             const incomplete = ungrouped.reduce(
-              (total, { action }) => total + (actionIncompleteReason(action) ? 1 : 0),
+              (total, { action }) =>
+                total + (action.id !== editingId && actionIncompleteReason(action) ? 1 : 0),
               0,
             );
             return (
@@ -1161,18 +1180,32 @@ function ActionEditor({
       .map((part) => part.trim())
       .filter(Boolean)
       .join(" ");
+    // The name is harness-derived: the base label is a locked prefix; only an
+    // optional suffix is editable. Renaming the harness rewrites the prefix.
+    const harnessLabel = meta.label;
+    const suffixMatch = action.label.match(/^(.*?)\s*[—-]\s*(.+)$/);
+    const suffix = suffixMatch ? suffixMatch[2].trim() : "";
+    const setSuffix = (next: string) =>
+      onChange({ label: next.trim() ? `${harnessLabel} — ${next.trim()}` : harnessLabel });
     return (
       <div
         ref={ref}
         className="grid grid-cols-2 gap-3 border-b border-zinc-100 bg-zinc-50 px-4 py-3 dark:border-zinc-800/60 dark:bg-zinc-800/30"
       >
         <label className="flex flex-col gap-1">
-          <span className={labelCls}>Label</span>
-          <input
-            className={inputCls}
-            value={action.label}
-            onChange={(event) => onChange({ label: event.target.value })}
-          />
+          <span className={labelCls}>Name (follows the harness)</span>
+          <div className="flex items-center gap-1.5">
+            <span className="shrink-0 rounded-md border border-zinc-200 bg-zinc-100 px-2.5 py-1.5 text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-800/60 dark:text-zinc-400">
+              {harnessLabel}
+            </span>
+            <span className="shrink-0 text-zinc-400">—</span>
+            <input
+              className={inputCls}
+              value={suffix}
+              onChange={(event) => setSuffix(event.target.value)}
+              placeholder="optional suffix (e.g. plan)"
+            />
+          </div>
         </label>
         <label className="flex flex-col gap-1">
           <span className={labelCls}>Custom hotkey</span>
