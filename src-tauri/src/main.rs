@@ -93,7 +93,18 @@ fn main() {
                             let _ = window.emit("refresh-repos", ());
                         }
                     }
-                    "reload" => app.restart(),
+                    "reload" => {
+                        // Reload the webview content (re-reads config + repos) instead of
+                        // restarting the whole process — a full app.restart() re-inits
+                        // WebView2 from scratch (~seconds) and re-registers the hotkey,
+                        // which read as "unresponsive after Reload".
+                        log::info!("tray: reload -> webview reload");
+                        for label in ["main", "settings"] {
+                            if let Some(window) = app.get_webview_window(label) {
+                                let _ = window.eval("window.location.reload()");
+                            }
+                        }
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -196,6 +207,7 @@ fn main() {
             // app — the tray still works.
             if let Err(error) = app.global_shortcut().on_shortcut(hotkey, |app, _shortcut, event| {
                 if event.state() == ShortcutState::Pressed {
+                    log::info!("hotkey: pressed -> toggle_window");
                     toggle_window(app);
                 }
             }) {
@@ -213,9 +225,11 @@ fn main() {
             cycle_sort,
             data_info,
             run_action,
+            commands::repos::open_path,
             list_distros,
             open_settings,
             update_hotkey,
+            log_event,
             commands::config::get_config,
             commands::config::save_config,
             commands::config::reset_config,
@@ -227,6 +241,13 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Frontend timing/diagnostic sink — lets the webview write into the unified log
+/// (file + stdout) so we can see UI readiness relative to the Rust startup steps.
+#[tauri::command]
+fn log_event(message: String) {
+    log::info!("ui: {}", message);
 }
 
 fn toggle_window(app: &tauri::AppHandle) {
@@ -246,9 +267,11 @@ fn toggle_window(app: &tauri::AppHandle) {
                 let _ = window.center();
             }
             commands::window_state::mark_activity();
+            let show_start = std::time::Instant::now();
             let _ = window.show();
             let _ = window.set_focus();
             let _ = window.emit("window-shown", ());
+            log::info!("show: window.show()+set_focus took {} ms", show_start.elapsed().as_millis());
         }
     }
 }

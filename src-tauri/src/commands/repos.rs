@@ -238,3 +238,84 @@ pub fn run_action(app: AppHandle, action: ActionDef, repo: Repo) -> Result<Optio
 
     Ok(result)
 }
+
+/// Resolve a path (POSIX or already-Windows) to a Windows path for explorer/start.
+#[cfg(target_os = "windows")]
+fn resolve_win(app: &AppHandle, path: &str) -> String {
+    if path.starts_with('/') {
+        let distro = load_config(app)
+            .ok()
+            .map(|config| super::cache::resolve_distro(&config))
+            .unwrap_or_else(|| "Ubuntu".to_string());
+        win_path(&distro, path)
+    } else {
+        path.to_string()
+    }
+}
+
+/// Open a Data-tab path. `mode`: "file" = launch with the default app, "reveal" =
+/// open the folder with the file selected, "folder" = open the folder itself.
+#[tauri::command]
+pub fn open_path(app: AppHandle, path: String, mode: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let win = resolve_win(&app, &path);
+        match mode.as_str() {
+            "reveal" | "folder" => {
+                // explorer.exe is a GUI app — no console flash.
+                let mut cmd = Command::new("explorer.exe");
+                if mode == "reveal" {
+                    cmd.arg(format!("/select,{}", win));
+                } else {
+                    cmd.arg(&win);
+                }
+                cmd.spawn().map_err(|err| format!("Failed to open {}: {}", win, err))?;
+            }
+            // "file": open with the default app exactly as a double-click does, via
+            // ShellExecuteW. Avoids `cmd /c start` (flashes a console + Rust's cmd-arg
+            // escaping mishandles some paths, so the file silently didn't open).
+            _ => {
+                use std::ffi::OsStr;
+                use std::os::windows::ffi::OsStrExt;
+                let wide = |value: &str| {
+                    OsStr::new(value).encode_wide().chain(std::iter::once(0)).collect::<Vec<u16>>()
+                };
+                let verb = wide("open");
+                let file = wide(&win);
+                let result = unsafe {
+                    windows_sys::Win32::UI::Shell::ShellExecuteW(
+                        std::ptr::null_mut(),
+                        verb.as_ptr(),
+                        file.as_ptr(),
+                        std::ptr::null(),
+                        std::ptr::null(),
+                        windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+                    )
+                };
+                // ShellExecuteW returns a value > 32 on success.
+                if (result as isize) <= 32 {
+                    return Err(format!("Failed to open {} (ShellExecute {})", win, result as isize));
+                }
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = &app;
+        let target = if mode == "reveal" {
+            std::path::Path::new(&path)
+                .parent()
+                .map(|parent| parent.display().to_string())
+                .unwrap_or_else(|| path.clone())
+        } else {
+            path.clone()
+        };
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        Command::new(opener)
+            .arg(&target)
+            .spawn()
+            .map_err(|err| format!("Failed to open {}: {}", target, err))?;
+        Ok(())
+    }
+}

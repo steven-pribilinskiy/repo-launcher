@@ -85,6 +85,16 @@ export default function Popup() {
     });
   }, []);
 
+  // Diagnostics: when the popup mounts and when it first paints, relative to
+  // process start — to locate any post-startup UI delay (e.g. after tray Reload).
+  useEffect(() => {
+    api.logEvent(`popup mounted at ${Math.round(performance.now())} ms`);
+    const raf = requestAnimationFrame(() =>
+      api.logEvent(`popup first paint at ${Math.round(performance.now())} ms`),
+    );
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   useEffect(() => {
     loadConfig().then(() => loadRepos());
   }, [loadConfig, loadRepos]);
@@ -96,6 +106,7 @@ export default function Popup() {
   // Re-summoned: reset, refocus, reload config (hotkey/actions/theme may have changed).
   useEffect(() => {
     const unlisten = listen("window-shown", () => {
+      api.logEvent(`window-shown at ${Math.round(performance.now())} ms`);
       setQuery("");
       setPaletteOpen(false);
       inputRef.current?.focus();

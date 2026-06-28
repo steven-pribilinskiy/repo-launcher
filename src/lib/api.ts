@@ -40,4 +40,12 @@ export const api = {
   dataInfo: () => invoke<DataInfo>("data_info"),
 
   resetWindowGeometry: () => invoke<void>("reset_window_geometry"),
+
+  /** Open a path: "file" = default app, "reveal" = folder with file selected,
+   * "folder" = open the folder. */
+  openPath: (path: string, mode: "file" | "reveal" | "folder") =>
+    invoke<void>("open_path", { path, mode }),
+
+  /** Write a timing/diagnostic line into the unified log (file + stdout). */
+  logEvent: (message: string) => invoke<void>("log_event", { message }).catch(() => {}),
 };

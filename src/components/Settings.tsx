@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { HotkeyInput } from "@/components/HotkeyInput";
 import {
   AlertTriangle,
@@ -481,16 +482,56 @@ function Toggle({
 
 // ── Data tab ──────────────────────────────────────────────────────────────────
 
+// Hover-revealed path actions. For a file: Open file (default app) · Open folder
+// (reveal + select the file) · Copy. For a folder: Open folder · Copy. Space is
+// reserved (opacity, not display) so revealing them never shifts the layout.
+function PathActions({
+  path,
+  kind,
+  exists = true,
+}: {
+  path: string;
+  kind: "file" | "folder";
+  exists?: boolean;
+}) {
+  const btn =
+    "rounded px-1.5 py-0.5 text-[11px] whitespace-nowrap text-zinc-500 hover:bg-zinc-200/70 hover:text-zinc-700 dark:text-zinc-400 dark:hover:bg-zinc-700/60 dark:hover:text-zinc-200";
+  return (
+    <div className="pointer-events-none flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100">
+      {exists && kind === "file" && (
+        <button type="button" className={btn} onClick={() => api.openPath(path, "file")}>
+          Open file
+        </button>
+      )}
+      {exists && (
+        <button
+          type="button"
+          className={btn}
+          onClick={() => api.openPath(path, kind === "file" ? "reveal" : "folder")}
+        >
+          Open folder
+        </button>
+      )}
+      <button type="button" className={btn} onClick={() => writeText(path)}>
+        Copy
+      </button>
+    </div>
+  );
+}
+
 function FileCard({ title, stat, extra }: { title: string; stat: PathStat; extra: string }) {
   return (
-    <div className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
-      <div className="mb-1 flex items-center justify-between">
+    <div className="group rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+      <div className="mb-1 flex items-center justify-between gap-2">
         <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">{title}</span>
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+        <span className="shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
           {stat.exists ? `${formatBytes(stat.size)} · updated ${timeAgo(stat.modified_unix)}` : "missing"}
         </span>
       </div>
-      <code className="block break-all text-xs text-zinc-500 dark:text-zinc-400">{stat.path}</code>
+      <div className="flex items-start justify-between gap-2">
+        <code className="min-w-0 break-all text-xs text-zinc-500 dark:text-zinc-400">{stat.path}</code>
+        <PathActions path={stat.path} kind="file" exists={stat.exists} />
+      </div>
       <div className="mt-1 text-xs text-indigo-600 dark:text-indigo-400">{extra}</div>
     </div>
   );
@@ -562,11 +603,17 @@ function DataTab() {
             <span className="px-1 text-xs text-zinc-400">No history yet.</span>
           )}
           {data.top_used.map((entry) => (
-            <div key={entry.path} className="flex items-center justify-between gap-3 px-1 text-xs">
-              <code className="truncate text-zinc-600 dark:text-zinc-300">{entry.path}</code>
-              <span className="shrink-0 text-zinc-400 dark:text-zinc-500">
-                {entry.uses}× · {timeAgo(entry.last_unix)}
-              </span>
+            <div
+              key={entry.path}
+              className="group flex items-center justify-between gap-2 rounded px-1 text-xs hover:bg-zinc-100/70 dark:hover:bg-zinc-800/50"
+            >
+              <code className="min-w-0 truncate text-zinc-600 dark:text-zinc-300">{entry.path}</code>
+              <div className="flex shrink-0 items-center gap-2">
+                <PathActions path={entry.path} kind="folder" />
+                <span className="shrink-0 text-zinc-400 dark:text-zinc-500">
+                  {entry.uses}× · {timeAgo(entry.last_unix)}
+                </span>
+              </div>
             </div>
           ))}
         </div>
