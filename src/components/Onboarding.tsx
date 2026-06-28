@@ -21,7 +21,7 @@ export function Onboarding({ config, onDone }: { config: AppConfig; onDone: () =
   };
 
   return (
-    <div className="flex h-screen flex-col justify-center gap-5 rounded-xl bg-white/95 px-8 py-6 backdrop-blur-xl dark:bg-zinc-900/95">
+    <div className="popup-surface relative flex h-full flex-col justify-center gap-5 bg-white/95 px-8 py-6 backdrop-blur-xl dark:bg-zinc-900/95">
       <div className="flex items-center gap-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-600 text-white">
           <FolderGit2 className="h-5 w-5" />

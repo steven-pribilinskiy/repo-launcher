@@ -79,6 +79,7 @@ export type DataInfo = {
   repos_tsv: PathStat;
   sort_file: PathStat;
   history_file: PathStat;
+  log_file: PathStat;
   repo_count: number;
   sort_mode: number;
   sort_label: string;
@@ -98,6 +99,7 @@ export type AppConfig = {
   notify_on_update: boolean;
   remember_position: boolean;
   launch_at_startup: boolean;
+  transparency: number;
   onboarded: boolean;
   actions: ActionDef[];
   groups: ActionGroup[];

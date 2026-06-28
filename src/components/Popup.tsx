@@ -5,6 +5,7 @@ import { SearchInput } from "@/components/SearchInput";
 import { RepoList } from "@/components/RepoList";
 import { RepoTable, type TableSort, type TableSortColumn } from "@/components/RepoTable";
 import { ActionBar } from "@/components/ActionBar";
+import { ActionsPalette } from "@/components/ActionsPalette";
 import { ResizeHandles } from "@/components/ResizeHandles";
 import { useRepoSearch } from "@/hooks/useRepoSearch";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
@@ -33,6 +34,7 @@ export default function Popup() {
     localStorage.getItem("repo_view") === "table" ? "table" : "list",
   );
   const [tableSort, setTableSort] = useState<TableSort | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   const { repos, isLoading, multiDistro, sortMode, config, loadConfig, loadRepos, cycleSort } =
     useRepoStore();
@@ -57,11 +59,14 @@ export default function Popup() {
 
   const onActionComplete = useCallback(() => {
     setQuery("");
+    setPaletteOpen(false);
   }, []);
 
   const { selectedIndex, setSelectedIndex, runAction } = useKeyboardNav({
     results: displayResults,
     onActionComplete,
+    paletteOpen,
+    onTogglePalette: () => setPaletteOpen((open) => !open),
   });
 
   const toggleView = useCallback(() => {
@@ -92,6 +97,7 @@ export default function Popup() {
   useEffect(() => {
     const unlisten = listen("window-shown", () => {
       setQuery("");
+      setPaletteOpen(false);
       inputRef.current?.focus();
       loadConfig();
       loadRepos();
@@ -129,7 +135,8 @@ export default function Popup() {
   return (
     <div
       onMouseDown={keepSearchFocused}
-      className="relative flex h-screen flex-col rounded-xl bg-white/95 backdrop-blur-xl dark:bg-zinc-900/95"
+      style={{ ["--surface-alpha" as string]: String(1 - (config?.transparency ?? 0) / 100) }}
+      className="popup-surface relative flex h-full flex-col backdrop-blur-xl"
     >
       <SearchInput ref={inputRef} value={query} onChange={setQuery} isLoading={isLoading} />
       {view === "table" ? (
@@ -154,12 +161,22 @@ export default function Popup() {
         onRun={runAction}
         onCycleSort={cycleSort}
         onOpenSettings={() => api.openSettings()}
+        onOpenPalette={() => setPaletteOpen(true)}
         repoCount={displayResults.length}
         sortMode={sortMode}
         view={view}
         onToggleView={toggleView}
       />
       <ResizeHandles />
+      {paletteOpen && (
+        <ActionsPalette
+          actions={(config?.actions ?? []).filter((action) => action.enabled)}
+          groups={config?.groups ?? []}
+          repoName={repoName(displayResults[selectedIndex]?.repo.path ?? "")}
+          onRun={runAction}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
     </div>
   );
 }

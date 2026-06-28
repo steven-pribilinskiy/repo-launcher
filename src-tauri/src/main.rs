@@ -21,16 +21,31 @@ fn main() {
     // by WebView2 at controller creation — must be set before any webview exists.
     std::env::set_var("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "00000000");
 
-    env_logger::init();
-
     tauri::Builder::default()
+        // Logging first, so everything below (and the timed startup steps) is captured.
+        // Writes to stdout AND a rolling file in the app log dir, surfaced in the
+        // Settings → Data tab. Override verbosity at runtime with RUST_LOG.
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("repo-launcher".into()),
+                    }),
+                ])
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .setup(|app| {
+            let setup_start = std::time::Instant::now();
+            let step = std::time::Instant::now();
             let config =
                 load_config(&app.handle()).unwrap_or_else(|_| commands::config::AppConfig::default());
+            log::info!("startup: load_config took {} ms", step.elapsed().as_millis());
 
             // Reconcile the OS login item with the saved preference, so a config
             // edited on disk (or a fresh install) reflects in the registry.
@@ -80,6 +95,7 @@ fn main() {
                     }
                 })
                 .build(app)?;
+            log::info!("startup: tray ready at {} ms", setup_start.elapsed().as_millis());
 
             // --- Main popup window behavior ---
             // REPO_LAUNCHER_NO_AUTOHIDE keeps the popup open when it loses focus;
@@ -170,9 +186,10 @@ fn main() {
                     toggle_window(app);
                 }
             }) {
-                eprintln!("Failed to register global hotkey '{}': {}", config.hotkey, error);
+                log::warn!("Failed to register global hotkey '{}': {}", config.hotkey, error);
             }
 
+            log::info!("startup: setup() complete in {} ms", setup_start.elapsed().as_millis());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use super::config::{load_config, AppConfig};
 use super::repos::{list_distros, Repo};
@@ -21,10 +21,17 @@ pub fn resolve_distro(config: &AppConfig) -> String {
     static AUTO_DISTRO: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     AUTO_DISTRO
         .get_or_init(|| {
-            list_distros()
+            let start = Instant::now();
+            let distro = list_distros()
                 .ok()
                 .and_then(|distros| distros.into_iter().next())
-                .unwrap_or_else(|| "Ubuntu".to_string())
+                .unwrap_or_else(|| "Ubuntu".to_string());
+            log::info!(
+                "resolve_distro: autodetect via `wsl --list` took {} ms -> {}",
+                start.elapsed().as_millis(),
+                distro
+            );
+            distro
         })
         .clone()
 }
@@ -85,10 +92,16 @@ fn wsl_home(distro: &str) -> Result<String, String> {
         return Ok(home.clone());
     }
 
+    let spawn = Instant::now();
     let output = Command::new("wsl")
         .args(["-d", distro, "--", "bash", "-lc", "printf %s \"$HOME\""])
         .output()
         .map_err(|err| format!("Failed to query WSL home: {}", err))?;
+    log::info!(
+        "wsl_home: `wsl.exe` spawn for distro {} took {} ms",
+        distro,
+        spawn.elapsed().as_millis()
+    );
     let home = super::repos::decode_wsl_output(&output.stdout)
         .trim()
         .trim_matches('\0')
@@ -143,8 +156,15 @@ fn read_repo_cache(config: &AppConfig) -> Result<Vec<Repo>, String> {
         // First run with no cache yet — build it once, blocking.
         let _ = run_rebuild(config, true);
     }
+    let read = Instant::now();
     let content = std::fs::read_to_string(&tsv)
         .map_err(|err| format!("Cannot read {}: {}", tsv.display(), err))?;
+    log::info!(
+        "read_repo_cache: read {} ({} bytes) in {} ms",
+        tsv.display(),
+        content.len(),
+        read.elapsed().as_millis()
+    );
     Ok(parse_cache(&content, &distro))
 }
 
@@ -290,9 +310,17 @@ pub fn append_history(config: &AppConfig, repo_path: &str) -> Result<(), String>
 /// Read the goto-repo cache and return it ranked by the shared sort mode.
 #[tauri::command]
 pub fn read_repos(app: AppHandle) -> Result<Vec<Repo>, String> {
+    let total = Instant::now();
     let config = load_config(&app)?;
     let repos = read_repo_cache(&config)?;
-    Ok(rank(&config, repos))
+    let count = repos.len();
+    let ranked = rank(&config, repos);
+    log::info!(
+        "read_repos: {} repos ready in {} ms (total)",
+        count,
+        total.elapsed().as_millis()
+    );
+    Ok(ranked)
 }
 
 /// Rebuild the cache (blocking, delegates to goto-repo) then return it ranked.
@@ -365,6 +393,7 @@ pub struct DataInfo {
     pub repos_tsv: PathStat,
     pub sort_file: PathStat,
     pub history_file: PathStat,
+    pub log_file: PathStat,
     pub repo_count: usize,
     pub sort_mode: u8,
     pub sort_label: String,
@@ -414,6 +443,13 @@ pub fn data_info(app: AppHandle) -> Result<DataInfo, String> {
     });
     top.truncate(12);
 
+    // tauri-plugin-log writes <app_log_dir>/repo-launcher.log (file_name + ".log").
+    let log_path = app
+        .path()
+        .app_log_dir()
+        .map(|dir| dir.join("repo-launcher.log"))
+        .unwrap_or_else(|_| PathBuf::from("repo-launcher.log"));
+
     Ok(DataInfo {
         distro: resolve_distro(&config),
         cache_dir: cache_dir.display().to_string(),
@@ -421,6 +457,7 @@ pub fn data_info(app: AppHandle) -> Result<DataInfo, String> {
         repos_tsv: path_stat(&cache_dir.join("repos.tsv")),
         sort_file: path_stat(&cache_dir.join("sort")),
         history_file: path_stat(&config_dir.join("history")),
+        log_file: path_stat(&log_path),
         repo_count: repos.len(),
         sort_mode,
         sort_label: labels.get(sort_mode as usize).unwrap_or(&"?").to_string(),

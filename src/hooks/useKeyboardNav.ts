@@ -9,9 +9,16 @@ import type { ActionDef, FuzzyResult } from "@/types";
 type UseKeyboardNavOptions = {
   results: FuzzyResult[];
   onActionComplete: () => void;
+  paletteOpen: boolean;
+  onTogglePalette: () => void;
 };
 
-export function useKeyboardNav({ results, onActionComplete }: UseKeyboardNavOptions) {
+export function useKeyboardNav({
+  results,
+  onActionComplete,
+  paletteOpen,
+  onTogglePalette,
+}: UseKeyboardNavOptions) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const config = useRepoStore((state) => state.config);
   const cycleSort = useRepoStore((state) => state.cycleSort);
@@ -42,6 +49,14 @@ export function useKeyboardNav({ results, onActionComplete }: UseKeyboardNavOpti
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
+      // Ctrl+K toggles the Raycast-style actions palette.
+      if (event.ctrlKey && !event.altKey && !event.metaKey && event.code === "KeyK") {
+        event.preventDefault();
+        onTogglePalette();
+        return;
+      }
+      // While the palette is open it owns the keyboard (its own handler runs).
+      if (paletteOpen) return;
       if (event.key === "ArrowDown") {
         event.preventDefault();
         setSelectedIndex((index) => Math.min(index + 1, results.length - 1));
@@ -104,7 +119,7 @@ export function useKeyboardNav({ results, onActionComplete }: UseKeyboardNavOpti
         }
       }
     },
-    [results.length, config, cycleSort, hideWindow, onActionComplete, runAction],
+    [results.length, config, cycleSort, hideWindow, onActionComplete, runAction, paletteOpen, onTogglePalette],
   );
 
   useEffect(() => {

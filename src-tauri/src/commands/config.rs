@@ -98,9 +98,12 @@ pub struct AppConfig {
     /// Remember the popup's last position across launches (size is always kept).
     #[serde(default = "default_true")]
     pub remember_position: bool,
-    /// Launch the app automatically when the user logs in.
-    #[serde(default)]
+    /// Launch the app automatically when the user logs in. Defaults on.
+    #[serde(default = "default_true")]
     pub launch_at_startup: bool,
+    /// Popup background see-through, 0–100 (0 = opaque). Defaults opaque.
+    #[serde(default)]
+    pub transparency: u8,
     /// Whether the first-launch onboarding has been completed.
     #[serde(default)]
     pub onboarded: bool,
@@ -143,7 +146,8 @@ impl Default for AppConfig {
             auto_restart_on_update: true,
             notify_on_update: true,
             remember_position: true,
-            launch_at_startup: false,
+            launch_at_startup: true,
+            transparency: 0,
             onboarded: false,
             actions: default_actions(),
             groups: default_groups(),
