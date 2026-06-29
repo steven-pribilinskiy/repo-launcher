@@ -72,7 +72,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   cycleSort: async () => {
     try {
       const repos = await api.cycleSort();
-      set({ repos, sortMode: (get().sortMode + 1) % 3 });
+      set({ repos, sortMode: (get().sortMode + 1) % 4 });
     } catch (error) {
       console.error("Failed to cycle sort:", error);
     }
@@ -81,7 +81,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   setSort: async (mode: number) => {
     try {
       const repos = await api.setSort(mode);
-      set({ repos, sortMode: mode % 3 });
+      set({ repos, sortMode: mode % 4 });
     } catch (error) {
       console.error("Failed to set sort:", error);
     }

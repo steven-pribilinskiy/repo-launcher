@@ -11,13 +11,13 @@ export const api = {
   /** Kick a background rebuild if the cache is older than the TTL. */
   maybeRefresh: () => invoke<void>("maybe_refresh"),
 
-  /** Current sort mode (0 alpha / 1 recent / 2 most-used). */
+  /** Current sort mode (0 alpha / 1 recent / 2 most-used / 3 type). */
   getSort: () => invoke<number>("get_sort"),
 
   /** Cycle the shared sort mode and return the re-ranked repos. */
   cycleSort: () => invoke<Repo[]>("cycle_sort"),
 
-  /** Set the shared sort mode (0 alpha / 1 recent / 2 most-used), re-ranked. */
+  /** Set the shared sort mode (0 alpha / 1 recent / 2 most-used / 3 type), re-ranked. */
   setSort: (mode: number) => invoke<Repo[]>("set_sort", { mode }),
 
   /** Run an action on a repo. Returns clipboard text for Clipboard actions. */

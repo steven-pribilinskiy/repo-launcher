@@ -19,12 +19,13 @@ type View = "list" | "table";
 
 // The shared sort mode (0 alpha / 1 recent / 2 most-used) maps 1:1 to a sortable
 // table column, so Ctrl+S and the table headers stay in sync both ways.
-const COLUMN_BY_SORT_MODE: TableSortColumn[] = ["name", "last_used", "uses"];
-const DIR_BY_SORT_MODE: ("asc" | "desc")[] = ["asc", "desc", "desc"];
+const COLUMN_BY_SORT_MODE: TableSortColumn[] = ["name", "last_used", "uses", "type"];
+const DIR_BY_SORT_MODE: ("asc" | "desc")[] = ["asc", "desc", "desc", "asc"];
 const SORT_MODE_BY_COLUMN: Partial<Record<TableSortColumn, number>> = {
   name: 0,
   last_used: 1,
   uses: 2,
+  type: 3,
 };
 
 // Keep the caret in the search field no matter where you click. preventDefault on

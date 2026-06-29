@@ -115,4 +115,4 @@ export type FuzzyResult = {
   indices: number[];
 };
 
-export const SORT_LABELS = ["alpha", "recent", "most-used"] as const;
+export const SORT_LABELS = ["alpha", "recent", "most-used", "type"] as const;

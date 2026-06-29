@@ -231,7 +231,7 @@ pub fn read_sort_mode(config: &AppConfig) -> u8 {
         .ok()
         .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|raw| raw.trim().parse::<u8>().ok())
-        .filter(|mode| *mode <= 2)
+        .filter(|mode| *mode <= 3)
         .unwrap_or(2)
 }
 
@@ -244,8 +244,9 @@ fn write_sort_mode(config: &AppConfig, mode: u8) -> Result<(), String> {
 }
 
 /// Pure ranking core, mirroring rank-repos.sh: 0 = alpha (by path), 1 = recent
-/// (max history ts desc), 2 = most-used (count desc). The sort is stable, so ties
-/// keep cache order (akin to find-repo's fzf --tiebreak=index).
+/// (max history ts desc), 2 = most-used (count desc), 3 = type (by kind asc, then
+/// path). The sort is stable, so ties keep cache order (akin to find-repo's
+/// fzf --tiebreak=index).
 fn rank_by(mode: u8, mut repos: Vec<Repo>, stats: &HashMap<String, (u64, u64)>) -> Vec<Repo> {
     match mode {
         1 | 2 => repos.sort_by(|left, right| {
@@ -253,6 +254,9 @@ fn rank_by(mode: u8, mut repos: Vec<Repo>, stats: &HashMap<String, (u64, u64)>) 
             let right_stat = stats.get(&right.path).copied().unwrap_or((0, 0));
             let key = |stat: (u64, u64)| if mode == 1 { stat.1 } else { stat.0 };
             key(right_stat).cmp(&key(left_stat))
+        }),
+        3 => repos.sort_by(|left, right| {
+            left.kind.cmp(&right.kind).then_with(|| left.path.cmp(&right.path))
         }),
         _ => repos.sort_by(|left, right| left.path.cmp(&right.path)),
     }
@@ -402,7 +406,7 @@ pub fn get_sort(app: AppHandle) -> Result<u8, String> {
 #[tauri::command]
 pub fn cycle_sort(app: AppHandle) -> Result<Vec<Repo>, String> {
     let config = load_config(&app)?;
-    let next = (read_sort_mode(&config) + 1) % 3;
+    let next = (read_sort_mode(&config) + 1) % 4;
     write_sort_mode(&config, next)?;
     let repos = read_repo_cache(&config)?;
     Ok(rank(&config, repos))
@@ -414,7 +418,7 @@ pub fn cycle_sort(app: AppHandle) -> Result<Vec<Repo>, String> {
 #[tauri::command]
 pub fn set_sort(app: AppHandle, mode: u8) -> Result<Vec<Repo>, String> {
     let config = load_config(&app)?;
-    write_sort_mode(&config, mode.min(2))?;
+    write_sort_mode(&config, mode.min(3))?;
     let repos = read_repo_cache(&config)?;
     Ok(rank(&config, repos))
 }
@@ -476,7 +480,7 @@ pub fn data_info(app: AppHandle) -> Result<DataInfo, String> {
     let repos = read_repo_cache(&config).unwrap_or_default();
     let stats = read_history_stats(&config);
     let sort_mode = read_sort_mode(&config);
-    let labels = ["alpha", "recent", "most-used"];
+    let labels = ["alpha", "recent", "most-used", "type"];
 
     let mut top: Vec<TopUsed> = stats
         .iter()
@@ -535,8 +539,12 @@ mod tests {
     }
 
     fn repo(path: &str) -> Repo {
+        repo_kind(path, "repo")
+    }
+
+    fn repo_kind(path: &str, kind: &str) -> Repo {
         Repo {
-            kind: "repo".into(),
+            kind: kind.into(),
             path: path.into(),
             distro: "Ubuntu".into(),
             uses: 0,
@@ -570,6 +578,21 @@ mod tests {
         stats.insert("/b".to_string(), (5u64, 50u64));
         let ranked = rank_by(1, vec![repo("/a"), repo("/b")], &stats);
         assert_eq!(ranked[0].path, "/a"); // most recent ts first
+    }
+
+    #[test]
+    fn rank_type_sorts_by_kind_then_path() {
+        let repos = vec![
+            repo_kind("/z", "wt"),
+            repo_kind("/a", "repo"),
+            repo_kind("/b", "dir"),
+            repo_kind("/c", "repo"),
+        ];
+        let ranked = rank_by(3, repos, &HashMap::new());
+        assert_eq!(
+            ranked.iter().map(|item| item.path.as_str()).collect::<Vec<_>>(),
+            vec!["/b", "/a", "/c", "/z"] // dir, repo (a,c), wt — kind asc, path tiebreak
+        );
     }
 
     #[test]

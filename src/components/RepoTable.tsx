@@ -9,11 +9,11 @@ export type TableSortColumn = "name" | "type" | "uses" | "last_used";
 export type TableSort = { column: TableSortColumn; dir: "asc" | "desc" };
 
 const GRID = "grid grid-cols-[1fr_4rem_4rem_7rem] gap-2";
-// Only Name / Uses / Last used map to the shared sort modes (alpha / most-used /
-// recent), so only those are sortable. Type has no shared mode — plain header.
+// Every column maps to a shared sort mode (alpha / type / most-used / recent),
+// so all headers are sortable and stay in sync with Ctrl+S.
 const COLUMNS: { key: TableSortColumn; label: string; align: string; sortable: boolean }[] = [
   { key: "name", label: "Name", align: "justify-start", sortable: true },
-  { key: "type", label: "Type", align: "justify-start", sortable: false },
+  { key: "type", label: "Type", align: "justify-start", sortable: true },
   { key: "uses", label: "Uses", align: "justify-end", sortable: true },
   { key: "last_used", label: "Last used", align: "justify-end", sortable: true },
 ];
