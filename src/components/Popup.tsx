@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SearchInput } from "@/components/SearchInput";
@@ -17,6 +17,16 @@ import { repoName } from "@/lib/utils";
 
 type View = "list" | "table";
 
+// The shared sort mode (0 alpha / 1 recent / 2 most-used) maps 1:1 to a sortable
+// table column, so Ctrl+S and the table headers stay in sync both ways.
+const COLUMN_BY_SORT_MODE: TableSortColumn[] = ["name", "last_used", "uses"];
+const DIR_BY_SORT_MODE: ("asc" | "desc")[] = ["asc", "desc", "desc"];
+const SORT_MODE_BY_COLUMN: Partial<Record<TableSortColumn, number>> = {
+  name: 0,
+  last_used: 1,
+  uses: 2,
+};
+
 // Keep the caret in the search field no matter where you click. preventDefault on
 // mousedown stops buttons / the list / drag handles from taking focus, so typing keeps
 // working after any interaction. The input itself (and any text field) is exempt so it
@@ -33,29 +43,21 @@ export default function Popup() {
   const [view, setView] = useState<View>(() =>
     localStorage.getItem("repo_view") === "table" ? "table" : "list",
   );
-  const [tableSort, setTableSort] = useState<TableSort | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
-  const { repos, isLoading, multiDistro, sortMode, config, loadConfig, loadRepos, cycleSort } =
+  const { repos, isLoading, multiDistro, sortMode, config, loadConfig, loadRepos, cycleSort, setSort } =
     useRepoStore();
 
   const results = useRepoSearch(query, repos);
 
-  // In table view, an active column sort overrides the goto-repo ranking.
-  const displayResults = useMemo(() => {
-    if (view !== "table" || !tableSort) return results;
-    const { column, dir } = tableSort;
-    const sorted = [...results];
-    sorted.sort((left, right) => {
-      let cmp = 0;
-      if (column === "name") cmp = repoName(left.repo.path).localeCompare(repoName(right.repo.path));
-      else if (column === "type") cmp = left.repo.kind.localeCompare(right.repo.kind);
-      else if (column === "uses") cmp = left.repo.uses - right.repo.uses;
-      else cmp = left.repo.last_used - right.repo.last_used;
-      return dir === "asc" ? cmp : -cmp;
-    });
-    return sorted;
-  }, [results, view, tableSort]);
+  // The shared sort mode (cycled by Ctrl+S, set by clicking a table header) is the
+  // single source of truth — the backend returns repos already ranked by it.
+  const displayResults = results;
+  // Reflect the active sort mode in the table headers (and vice versa).
+  const tableSort: TableSort = {
+    column: COLUMN_BY_SORT_MODE[sortMode] ?? "uses",
+    dir: DIR_BY_SORT_MODE[sortMode] ?? "desc",
+  };
 
   const onActionComplete = useCallback(() => {
     setQuery("");
@@ -79,13 +81,13 @@ export default function Popup() {
     });
   }, []);
 
-  const onSort = useCallback((column: TableSortColumn) => {
-    setTableSort((prev) => {
-      if (prev?.column === column) return { column, dir: prev.dir === "asc" ? "desc" : "asc" };
-      const dir = column === "name" || column === "type" ? "asc" : "desc";
-      return { column, dir };
-    });
-  }, []);
+  const onSort = useCallback(
+    (column: TableSortColumn) => {
+      const mode = SORT_MODE_BY_COLUMN[column];
+      if (mode !== undefined) void setSort(mode);
+    },
+    [setSort],
+  );
 
   // Diagnostics: when the popup mounts and when it first paints, relative to
   // process start — to locate any post-startup UI delay (e.g. after tray Reload).

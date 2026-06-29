@@ -9,11 +9,13 @@ export type TableSortColumn = "name" | "type" | "uses" | "last_used";
 export type TableSort = { column: TableSortColumn; dir: "asc" | "desc" };
 
 const GRID = "grid grid-cols-[1fr_4rem_4rem_7rem] gap-2";
-const COLUMNS: { key: TableSortColumn; label: string; align: string }[] = [
-  { key: "name", label: "Name", align: "justify-start" },
-  { key: "type", label: "Type", align: "justify-start" },
-  { key: "uses", label: "Uses", align: "justify-end" },
-  { key: "last_used", label: "Last used", align: "justify-end" },
+// Only Name / Uses / Last used map to the shared sort modes (alpha / most-used /
+// recent), so only those are sortable. Type has no shared mode — plain header.
+const COLUMNS: { key: TableSortColumn; label: string; align: string; sortable: boolean }[] = [
+  { key: "name", label: "Name", align: "justify-start", sortable: true },
+  { key: "type", label: "Type", align: "justify-start", sortable: false },
+  { key: "uses", label: "Uses", align: "justify-end", sortable: true },
+  { key: "last_used", label: "Last used", align: "justify-end", sortable: true },
 ];
 
 type RepoTableProps = {
@@ -45,25 +47,39 @@ export function RepoTable({ results, selectedIndex, onSelect, sort, onSort }: Re
           "border-b border-zinc-200 px-3 py-1.5 dark:border-zinc-700/50",
         )}
       >
-        {COLUMNS.map((column) => (
-          <button
-            key={column.key}
-            type="button"
-            onClick={() => onSort(column.key)}
-            className={cn(
-              "flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300",
-              column.align,
-            )}
-          >
-            {column.label}
-            {sort?.column === column.key &&
-              (sort.dir === "asc" ? (
-                <ChevronUp className="h-3 w-3" />
-              ) : (
-                <ChevronDown className="h-3 w-3" />
-              ))}
-          </button>
-        ))}
+        {COLUMNS.map((column) => {
+          const active = sort?.column === column.key;
+          const base = cn(
+            "flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide",
+            column.align,
+            active ? "text-zinc-700 dark:text-zinc-200" : "text-zinc-400",
+          );
+          const arrow = active ? (
+            sort.dir === "asc" ? (
+              <ChevronUp className="h-3 w-3" />
+            ) : (
+              <ChevronDown className="h-3 w-3" />
+            )
+          ) : null;
+          if (!column.sortable) {
+            return (
+              <span key={column.key} className={base}>
+                {column.label}
+              </span>
+            );
+          }
+          return (
+            <button
+              key={column.key}
+              type="button"
+              onClick={() => onSort(column.key)}
+              className={cn(base, "hover:text-zinc-600 dark:hover:text-zinc-300")}
+            >
+              {column.label}
+              {arrow}
+            </button>
+          );
+        })}
       </div>
 
       {results.length === 0 ? (

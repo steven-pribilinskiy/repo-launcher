@@ -408,6 +408,17 @@ pub fn cycle_sort(app: AppHandle) -> Result<Vec<Repo>, String> {
     Ok(rank(&config, repos))
 }
 
+/// Set the shared sort mode to a specific value (0 alpha / 1 recent / 2 most-used)
+/// and return the re-ranked repos — used when a table header is clicked, so it
+/// stays in sync with the Ctrl+S sort (both write the same shared `sort` file).
+#[tauri::command]
+pub fn set_sort(app: AppHandle, mode: u8) -> Result<Vec<Repo>, String> {
+    let config = load_config(&app)?;
+    write_sort_mode(&config, mode.min(2))?;
+    let repos = read_repo_cache(&config)?;
+    Ok(rank(&config, repos))
+}
+
 // ── Data diagnostics ─────────────────────────────────────────────────────────
 
 #[derive(Serialize)]

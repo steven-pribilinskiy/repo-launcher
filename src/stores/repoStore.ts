@@ -15,6 +15,7 @@ type RepoStore = {
   loadRepos: () => Promise<void>;
   refresh: () => Promise<void>;
   cycleSort: () => Promise<void>;
+  setSort: (mode: number) => Promise<void>;
 };
 
 export const useRepoStore = create<RepoStore>((set, get) => ({
@@ -74,6 +75,15 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
       set({ repos, sortMode: (get().sortMode + 1) % 3 });
     } catch (error) {
       console.error("Failed to cycle sort:", error);
+    }
+  },
+
+  setSort: async (mode: number) => {
+    try {
+      const repos = await api.setSort(mode);
+      set({ repos, sortMode: mode % 3 });
+    } catch (error) {
+      console.error("Failed to set sort:", error);
     }
   },
 }));

@@ -17,6 +17,9 @@ export const api = {
   /** Cycle the shared sort mode and return the re-ranked repos. */
   cycleSort: () => invoke<Repo[]>("cycle_sort"),
 
+  /** Set the shared sort mode (0 alpha / 1 recent / 2 most-used), re-ranked. */
+  setSort: (mode: number) => invoke<Repo[]>("set_sort", { mode }),
+
   /** Run an action on a repo. Returns clipboard text for Clipboard actions. */
   runAction: (action: ActionDef, repo: Repo) =>
     invoke<string | null>("run_action", { action, repo }),
