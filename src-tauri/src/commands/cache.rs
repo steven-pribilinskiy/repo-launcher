@@ -141,18 +141,6 @@ pub fn prime_wsl_cache(app: &AppHandle) {
             changed = true;
         }
     }
-    // One-shot desktop shortcut: a genuinely fresh install (not yet onboarded) gets
-    // one icon; existing users don't get a surprise. Either way mark it done so it's
-    // never auto-created again — the user owns it via the Settings button afterwards.
-    if !config.desktop_shortcut_initialized {
-        if !config.onboarded {
-            if let Err(error) = super::repos::create_desktop_shortcut() {
-                log::warn!("desktop shortcut: {}", error);
-            }
-        }
-        config.desktop_shortcut_initialized = true;
-        changed = true;
-    }
     if changed {
         let _ = super::config::persist_config(app, &config);
     }

@@ -66,8 +66,7 @@ fn main() {
             #[cfg(target_os = "windows")]
             {
                 let needs_prime = config.wsl_distro.as_deref().unwrap_or("").trim().is_empty()
-                    || config.wsl_home.as_deref().unwrap_or("").trim().is_empty()
-                    || !config.desktop_shortcut_initialized;
+                    || config.wsl_home.as_deref().unwrap_or("").trim().is_empty();
                 if needs_prime {
                     let handle = app.handle().clone();
                     std::thread::spawn(move || commands::cache::prime_wsl_cache(&handle));
@@ -167,15 +166,23 @@ fn main() {
                         // The old instant check could suppress a single blur and leave the
                         // popup stuck visible forever (no later blur to retry) — this retries.
                         if autohide_enabled && onboarded {
-                            let win = handle.clone();
-                            std::thread::spawn(move || {
-                                std::thread::sleep(std::time::Duration::from_millis(250));
-                                let focused = win.is_focused().unwrap_or(false);
-                                let cursor_over = commands::window_drag::cursor_over_window(&win, 16);
-                                if !focused && !cursor_over {
-                                    let _ = win.hide();
-                                }
-                            });
+                            // Cursor not over the popup = a genuine click-away → hide NOW
+                            // (instant, like Esc / opening Settings). If it's over the popup
+                            // (grabbing a resize edge), debounce + re-check so a transient
+                            // blur doesn't hide it mid-resize.
+                            if !commands::window_drag::cursor_over_window(&handle, 16) {
+                                let _ = handle.hide();
+                            } else {
+                                let win = handle.clone();
+                                std::thread::spawn(move || {
+                                    std::thread::sleep(std::time::Duration::from_millis(250));
+                                    if !win.is_focused().unwrap_or(false)
+                                        && !commands::window_drag::cursor_over_window(&win, 16)
+                                    {
+                                        let _ = win.hide();
+                                    }
+                                });
+                            }
                         }
                     }
                     // The popup is never truly closed — closing just hides it; the app
