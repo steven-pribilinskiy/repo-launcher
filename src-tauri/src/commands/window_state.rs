@@ -18,15 +18,6 @@ pub fn mark_activity() {
     }
 }
 
-/// True if there was activity within the last `within_ms` — used to suppress the
-/// focus-race blur that fires right after showing or while resizing.
-pub fn recently_active(within_ms: u64) -> bool {
-    last_activity()
-        .lock()
-        .map(|guard| guard.elapsed().as_millis() < u128::from(within_ms))
-        .unwrap_or(false)
-}
-
 /// Debounce toggling: returns false (skip) if called within 250ms of the last
 /// allowed toggle, so a held/auto-repeating hotkey doesn't thrash show/hide.
 pub fn toggle_allowed() -> bool {
