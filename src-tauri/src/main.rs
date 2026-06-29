@@ -160,21 +160,13 @@ fn main() {
                         let onboarded = load_config(handle.app_handle())
                             .map(|cfg| cfg.onboarded)
                             .unwrap_or(true);
-                        // Auto-hide decided purely by focus — NOT cursor position. Wait a
-                        // short moment, then hide if the window is STILL unfocused. A
-                        // transient blur (grabbing a resize edge) re-focuses within the
-                        // delay and cancels itself; a real click-away / alt-tab stays
-                        // unfocused and hides, no matter where the mouse is. (The old
-                        // cursor-over guard could suppress the hide forever if focus left
-                        // while the cursor sat on the popup — that was the "stuck" bug.)
-                        if autohide_enabled && onboarded {
-                            let win = handle.clone();
-                            std::thread::spawn(move || {
-                                std::thread::sleep(std::time::Duration::from_millis(120));
-                                if !win.is_focused().unwrap_or(false) {
-                                    let _ = win.hide();
-                                }
-                            });
+                        // Auto-hide is instant on a real focus loss (click-away / alt-tab).
+                        // The one blur we must ignore is the transient one from grabbing a
+                        // resize edge or the drag grip — that's covered deterministically by
+                        // the WM_ENTERSIZEMOVE flag, not a timing guess, so there's no delay
+                        // and no "stuck visible" failure mode.
+                        if autohide_enabled && onboarded && !commands::window_drag::is_interacting() {
+                            let _ = handle.hide();
                         }
                     }
                     // The popup is never truly closed — closing just hides it; the app

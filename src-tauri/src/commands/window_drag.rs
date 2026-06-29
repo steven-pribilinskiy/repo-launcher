@@ -6,6 +6,18 @@ use std::sync::atomic::{AtomicBool, Ordering};
 // still works.
 static MOVING: AtomicBool = AtomicBool::new(false);
 
+// True while the OS is running a modal move/size loop for the popup — set on
+// WM_ENTERSIZEMOVE, cleared on WM_EXITSIZEMOVE (covers both edge-resize and the
+// footer-grip drag). Auto-hide consults this so the transient focus blur from
+// grabbing a resize edge doesn't dismiss the popup. Deterministic — no timer, no
+// IPC race (the message arrives before the blur). Always false off Windows.
+static INTERACTING: AtomicBool = AtomicBool::new(false);
+
+/// Whether the user is actively moving or edge-resizing the popup right now.
+pub fn is_interacting() -> bool {
+    INTERACTING.load(Ordering::SeqCst)
+}
+
 /// Called from JS right before `startDragging()` so the drag guard locks the window
 /// size for the duration of the move (and refreshes the auto-hide activity timer).
 #[tauri::command]
@@ -36,12 +48,12 @@ pub fn install_drag_guard(window: &tauri::WebviewWindow) {
 
 #[cfg(windows)]
 mod win {
-    use super::{Ordering, MOVING};
+    use super::{Ordering, INTERACTING, MOVING};
     use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
     use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, SWP_NOSIZE, WINDOWPOS,
-        WM_EXITSIZEMOVE, WM_WINDOWPOSCHANGING, WS_EX_TOOLWINDOW,
+        WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_WINDOWPOSCHANGING, WS_EX_TOOLWINDOW,
     };
 
     const SUBCLASS_ID: usize = 0xF20E;
@@ -83,9 +95,15 @@ mod win {
                     }
                 }
             }
+            WM_ENTERSIZEMOVE => {
+                // A modal move/size loop just started (edge-resize or grip-drag) — tell
+                // auto-hide to ignore the focus blur that follows.
+                INTERACTING.store(true, Ordering::SeqCst);
+            }
             WM_EXITSIZEMOVE => {
+                INTERACTING.store(false, Ordering::SeqCst);
                 // FancyZones / aero-snap call SetWindowPos from a low-level mouse hook
-                // AFTER the modal move loop returns; hold the lock briefly to catch it.
+                // AFTER the modal move loop returns; hold the size lock briefly to catch it.
                 std::thread::spawn(|| {
                     std::thread::sleep(std::time::Duration::from_millis(300));
                     MOVING.store(false, Ordering::SeqCst);
