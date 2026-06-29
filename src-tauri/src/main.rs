@@ -160,29 +160,21 @@ fn main() {
                         let onboarded = load_config(handle.app_handle())
                             .map(|cfg| cfg.onboarded)
                             .unwrap_or(true);
-                        // Debounced auto-hide: wait briefly, then hide only if the popup is
-                        // STILL unfocused and the cursor isn't over it (so a transient blur
-                        // from grabbing a resize edge, or a quick re-focus, cancels itself).
-                        // The old instant check could suppress a single blur and leave the
-                        // popup stuck visible forever (no later blur to retry) — this retries.
+                        // Auto-hide decided purely by focus — NOT cursor position. Wait a
+                        // short moment, then hide if the window is STILL unfocused. A
+                        // transient blur (grabbing a resize edge) re-focuses within the
+                        // delay and cancels itself; a real click-away / alt-tab stays
+                        // unfocused and hides, no matter where the mouse is. (The old
+                        // cursor-over guard could suppress the hide forever if focus left
+                        // while the cursor sat on the popup — that was the "stuck" bug.)
                         if autohide_enabled && onboarded {
-                            // Cursor not over the popup = a genuine click-away → hide NOW
-                            // (instant, like Esc / opening Settings). If it's over the popup
-                            // (grabbing a resize edge), debounce + re-check so a transient
-                            // blur doesn't hide it mid-resize.
-                            if !commands::window_drag::cursor_over_window(&handle, 16) {
-                                let _ = handle.hide();
-                            } else {
-                                let win = handle.clone();
-                                std::thread::spawn(move || {
-                                    std::thread::sleep(std::time::Duration::from_millis(250));
-                                    if !win.is_focused().unwrap_or(false)
-                                        && !commands::window_drag::cursor_over_window(&win, 16)
-                                    {
-                                        let _ = win.hide();
-                                    }
-                                });
-                            }
+                            let win = handle.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(std::time::Duration::from_millis(120));
+                                if !win.is_focused().unwrap_or(false) {
+                                    let _ = win.hide();
+                                }
+                            });
                         }
                     }
                     // The popup is never truly closed — closing just hides it; the app

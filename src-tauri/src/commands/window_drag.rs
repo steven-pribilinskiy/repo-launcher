@@ -20,31 +20,6 @@ pub fn begin_window_move() {
     });
 }
 
-/// True if the OS cursor is over the window's outer rect, expanded by `margin` physical
-/// px. Used to suppress hide-on-blur when the user is interacting with the window edge
-/// (grabbing a resize border) or just missed the thin resize zone — those blurs should
-/// not dismiss the popup. Always false off Windows.
-#[cfg(windows)]
-pub fn cursor_over_window(window: &tauri::WebviewWindow, margin: i32) -> bool {
-    use windows_sys::Win32::Foundation::POINT;
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
-    let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
-        return false;
-    };
-    let mut point = POINT { x: 0, y: 0 };
-    if unsafe { GetCursorPos(&mut point) } == 0 {
-        return false;
-    }
-    point.x >= pos.x - margin
-        && point.x < pos.x + size.width as i32 + margin
-        && point.y >= pos.y - margin
-        && point.y < pos.y + size.height as i32 + margin
-}
-
-#[cfg(not(windows))]
-pub fn cursor_over_window(_window: &tauri::WebviewWindow, _margin: i32) -> bool {
-    false
-}
 
 /// Install the FancyZones / aero-snap drag guard (tool-window style + size-lock subclass)
 /// on the given window. No-op off Windows.
