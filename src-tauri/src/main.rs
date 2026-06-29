@@ -289,6 +289,12 @@ fn toggle_window(app: &tauri::AppHandle) {
 }
 
 fn show_settings(app: &tauri::AppHandle) {
+    // Hide the always-on-top popup first, otherwise it renders ON TOP of the
+    // settings window (which isn't always-on-top). Covers every entry point —
+    // the popup's gear, the tray "Settings" item, and the Ctrl+, shortcut.
+    if let Some(main) = app.get_webview_window("main") {
+        let _ = main.hide();
+    }
     if let Some(window) = app.get_webview_window("settings") {
         let _ = window.show();
         let _ = window.set_focus();
@@ -296,13 +302,9 @@ fn show_settings(app: &tauri::AppHandle) {
     }
 }
 
-/// Show the settings window (invoked from the popup's gear button). Hides the
-/// always-on-top popup first so it doesn't cover the settings window.
+/// Show the settings window (invoked from the popup's gear button).
 #[tauri::command]
 fn open_settings(app: tauri::AppHandle) {
-    if let Some(main) = app.get_webview_window("main") {
-        let _ = main.hide();
-    }
     show_settings(&app);
 }
 

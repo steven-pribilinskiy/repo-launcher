@@ -1,6 +1,6 @@
 [package]
 name = "repo-launcher"
-version = "0.8.9"
+version = "0.9.2"
 description = "Global-hotkey folder launcher over the goto-repo cache"
 edition = "2021"
 

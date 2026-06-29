@@ -67,6 +67,8 @@ export default function Popup() {
     onActionComplete,
     paletteOpen,
     onTogglePalette: () => setPaletteOpen((open) => !open),
+    hasQuery: query.length > 0,
+    onClearQuery: () => setQuery(""),
   });
 
   const toggleView = useCallback(() => {

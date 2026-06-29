@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   CornerDownLeft,
-  GripVertical,
+  GripHorizontal,
   List as ListIcon,
   Settings as SettingsIcon,
   Table2,
@@ -65,43 +65,46 @@ export function ActionBar({
   return (
     <div
       onMouseDown={startWindowDrag}
-      className="flex items-center gap-3 border-t border-zinc-200 px-3 py-2 dark:border-zinc-700/50"
+      className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-t border-zinc-200 px-3 py-2 dark:border-zinc-700/50"
     >
-      <div
-        title="Drag to move"
-        className="flex cursor-grab items-center text-zinc-300 active:cursor-grabbing dark:text-zinc-600"
-      >
-        <GripVertical className="h-4 w-4" />
-      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        {primary && (
+          <button
+            type="button"
+            onClick={() => onRun(primary)}
+            title={primary.label}
+            className="flex items-center gap-1.5 rounded px-1.5 py-0.5 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60"
+          >
+            <Kbd>
+              <CornerDownLeft className="inline h-3 w-3" />
+            </Kbd>
+            <span className="max-w-[180px] truncate text-[11px] text-zinc-600 dark:text-zinc-300">
+              {primary.label}
+            </span>
+          </button>
+        )}
 
-      {primary && (
         <button
           type="button"
-          onClick={() => onRun(primary)}
-          title={primary.label}
+          onClick={onOpenPalette}
+          title="All actions"
           className="flex items-center gap-1.5 rounded px-1.5 py-0.5 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60"
         >
-          <Kbd>
-            <CornerDownLeft className="inline h-3 w-3" />
-          </Kbd>
-          <span className="max-w-[180px] truncate text-[11px] text-zinc-600 dark:text-zinc-300">
-            {primary.label}
-          </span>
+          <Kbd>Ctrl+K</Kbd>
+          <span className="text-[11px] text-zinc-500 dark:text-zinc-400">Actions</span>
         </button>
-      )}
+      </div>
 
-      <button
-        type="button"
-        onClick={onOpenPalette}
-        title="All actions"
-        className="flex items-center gap-1.5 rounded px-1.5 py-0.5 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60"
+      {/* Centered drag handle — even gaps between the actions and the right cluster. */}
+      <span
+        title="Drag to move"
+        className="flex cursor-grab items-center px-2 text-zinc-300 active:cursor-grabbing dark:text-zinc-600"
       >
-        <Kbd>Ctrl+K</Kbd>
-        <span className="text-[11px] text-zinc-500 dark:text-zinc-400">Actions</span>
-      </button>
+        <GripHorizontal className="h-4 w-4" />
+      </span>
 
-      <div className="ml-auto flex items-center gap-2">
-        <span className="text-[11px] text-zinc-400 dark:text-zinc-600">{repoCount} repos</span>
+      <div className="flex shrink-0 items-center gap-2">
+        <span className="whitespace-nowrap text-[11px] text-zinc-400 dark:text-zinc-600">{repoCount} repos</span>
         <button
           type="button"
           onClick={onToggleView}
@@ -117,7 +120,7 @@ export function ActionBar({
           className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60"
         >
           <Kbd>Ctrl+S</Kbd>
-          <span className="text-[11px] text-zinc-500 dark:text-zinc-400">Sort: {SORT_LABELS[sortMode]}</span>
+          <span className="whitespace-nowrap text-[11px] text-zinc-500 dark:text-zinc-400">Sort: {SORT_LABELS[sortMode]}</span>
         </button>
         <button
           type="button"

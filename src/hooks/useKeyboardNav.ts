@@ -11,6 +11,8 @@ type UseKeyboardNavOptions = {
   onActionComplete: () => void;
   paletteOpen: boolean;
   onTogglePalette: () => void;
+  hasQuery: boolean;
+  onClearQuery: () => void;
 };
 
 export function useKeyboardNav({
@@ -18,6 +20,8 @@ export function useKeyboardNav({
   onActionComplete,
   paletteOpen,
   onTogglePalette,
+  hasQuery,
+  onClearQuery,
 }: UseKeyboardNavOptions) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const config = useRepoStore((state) => state.config);
@@ -69,8 +73,13 @@ export function useKeyboardNav({
       }
       if (event.key === "Escape") {
         event.preventDefault();
-        hideWindow();
-        onActionComplete();
+        // First Esc clears a non-empty search; a second (empty search) hides.
+        if (hasQuery) {
+          onClearQuery();
+        } else {
+          hideWindow();
+          onActionComplete();
+        }
         return;
       }
       // Ctrl+S cycles the shared sort mode (matches goto-repo's picker).
@@ -119,7 +128,7 @@ export function useKeyboardNav({
         }
       }
     },
-    [results.length, config, cycleSort, hideWindow, onActionComplete, runAction, paletteOpen, onTogglePalette],
+    [results.length, config, cycleSort, hideWindow, onActionComplete, runAction, paletteOpen, onTogglePalette, hasQuery, onClearQuery],
   );
 
   useEffect(() => {
