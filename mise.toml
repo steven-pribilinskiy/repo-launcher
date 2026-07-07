@@ -1,0 +1,35 @@
+# Cross-platform bootstrap + task runner (https://mise.jdx.dev/).
+# `mise install` provisions the toolchain; `mise run <task>` runs a task.
+# On Windows this is the primary path — `mise run bundle` builds the NSIS/MSI
+# installer natively (Tauri Windows bundles can't be cross-built from WSL).
+# Note: Rust here needs the MSVC C++ Build Tools + WebView2 on Windows; mise
+# manages Node + Rust only, not those system components (see README).
+
+[tools]
+node = "lts"
+rust = "stable"
+
+[tasks.setup]
+description = "Install JS deps (run `mise install` first for Node + Rust)"
+run = "npm install"
+
+[tasks.dev]
+description = "Run the app in dev mode (tauri dev)"
+run = "npm run tauri dev"
+
+[tasks.build]
+description = "Typecheck + build the frontend (tsc + vite build)"
+run = "npm run build"
+
+[tasks.bundle]
+description = "Build the native app + installers (NSIS .exe + .msi on Windows)"
+run = "npm run tauri build"
+
+[tasks.preview]
+description = "Serve the built frontend (vite preview)"
+run = "npm run preview"
+
+[tasks.test]
+description = "Rust unit tests — cache parsing + ranking (cargo test --lib)"
+dir = "src-tauri"
+run = "cargo test --lib"

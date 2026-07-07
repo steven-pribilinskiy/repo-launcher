@@ -93,17 +93,56 @@ item so the launcher starts automatically when you log in), the update behavior
 Settings persist to the app config dir (`%APPDATA%\com.stevenp.repo-launcher\config.json`
 on Windows). The repo list, sort mode, and history are shared with goto-repo.
 
-## Develop
+## Prerequisites
+
+- **Node.js** (LTS) + npm — builds the frontend.
+- **Rust** (stable) + Cargo — compiles the Tauri backend.
+- **System libraries:**
+  - *Linux / WSL:* `libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config`
+  - *Windows:* Microsoft C++ Build Tools (MSVC) and the WebView2 runtime (preinstalled on Windows 10/11).
+
+`make doctor` reports which of these are present.
+
+## Bootstrap
+
+### Linux / WSL — Makefile
 
 ```sh
-npm install
-npm run tauri dev      # run the app
-npm run build          # typecheck + build the frontend
-cd src-tauri && cargo test --lib   # unit tests (cache parsing + ranking)
+make            # list all tasks
+make doctor     # check prerequisites (no install, no sudo)
+make setup      # install system libs (sudo apt), Rust, and npm deps
+make dev        # run the app
 ```
 
-## Build
+### Windows (and cross-platform) — mise
 
-```sh
-npm run tauri build    # produces an NSIS installer + MSI on Windows
+[mise](https://mise.jdx.dev/) provisions Node + Rust and runs the same tasks. Because it runs
+natively on Windows, `mise run bundle` there produces a real Windows installer — the Tauri NSIS/MSI
+bundle can't be cross-built from WSL.
+
+```powershell
+scoop install mise           # or: winget install jdx.mise
+mise install                 # installs Node + Rust (via rustup)
+# one-time: install VS C++ Build Tools + WebView2
+#   winget install Microsoft.VisualStudio.2022.BuildTools   (add the "Desktop development with C++" workload)
+mise run dev                 # run the app from source
+mise run bundle              # build installers -> src-tauri/target/release/bundle/nsis/repo-launcher_<ver>_x64-setup.exe
 ```
+
+Double-click the generated `…_x64-setup.exe` to install (per-user, no admin). `mise tasks ls` lists
+every task; the same tasks work on Linux/macOS too.
+
+## Tasks
+
+Both `make <task>` and `mise run <task>` expose the same set:
+
+| Task | What it does |
+|---|---|
+| `dev` | Run the app (`tauri dev`) |
+| `build` | Typecheck + build the frontend (`tsc && vite build`) |
+| `bundle` | Build the native app + installers (`tauri build`) |
+| `preview` | Serve the built frontend (`vite preview`) |
+| `test` | Rust unit tests — cache parsing + ranking (`cargo test --lib`) |
+
+Makefile-only helpers: `doctor` (check prereqs), `setup` (auto-install everything), `install`
+(npm only), `fmt` (`cargo fmt`), `clean` / `clean-all`.
