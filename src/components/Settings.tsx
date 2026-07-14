@@ -182,6 +182,7 @@ export default function Settings() {
       next.cache_path = defaults.cache_path;
       next.rebuild_command = defaults.rebuild_command;
       next.cache_ttl_seconds = defaults.cache_ttl_seconds;
+      next.reload_throttle_minutes = defaults.reload_throttle_minutes;
       next.remember_position = defaults.remember_position;
       next.launch_at_startup = defaults.launch_at_startup;
       next.transparency = defaults.transparency;
@@ -375,6 +376,22 @@ function GeneralTab({
           value={config.cache_ttl_seconds}
           onChange={(event) => patch({ cache_ttl_seconds: Number(event.target.value) || 0 })}
         />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className={labelCls}>Popup reload cache</span>
+        <select
+          className={inputCls}
+          value={config.reload_throttle_minutes}
+          onChange={(event) => patch({ reload_throttle_minutes: Number(event.target.value) })}
+        >
+          <option value={0.5}>30 sec</option>
+          <option value={1}>1 min</option>
+          <option value={2}>2 min</option>
+          <option value={4}>4 min</option>
+          <option value={6}>6 min</option>
+          <option value={12}>12 min</option>
+          <option value={24}>24 min</option>
+        </select>
       </label>
       <label className="col-span-2 flex flex-col gap-1">
         <span className={labelCls}>Cache path override (goto-repo cache dir)</span>
@@ -1414,6 +1431,7 @@ function fieldDiffs(config: AppConfig, defaults: AppConfig): FieldDiff[] {
     ["Cache path", "cache_path"],
     ["Rebuild command", "rebuild_command"],
     ["Cache TTL", "cache_ttl_seconds"],
+    ["Popup reload cache (min)", "reload_throttle_minutes"],
     ["Remember position", "remember_position"],
     ["Launch at startup", "launch_at_startup"],
     ["Window transparency", "transparency"],

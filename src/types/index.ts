@@ -7,7 +7,11 @@ export type Repo = {
   last_used: number;
 };
 
-export type ActionKind = "clipboard" | "exec" | "agent";
+export type ActionKind = "clipboard" | "exec" | "agent" | "system";
+
+/** Id of the built-in "Refresh repos cache" system action (synthesized in
+ * Popup.tsx for the palette — frontend-only, never persisted to config). */
+export const SYSTEM_ACTION_REFRESH = "system-refresh-repos";
 
 export type ActionRole = "primary" | "alternative";
 
@@ -45,6 +49,9 @@ export type ActionDef = {
   group?: string | null;
   /** Agent actions: extra flags appended after `{cli} {dangerousFlag}`. */
   agentFlags?: string | null;
+  /** "system" actions only: replaces the hotkey chips with plain text (e.g. a
+   * countdown). Frontend-only — never persisted or sent to the backend. */
+  rightLabel?: string | null;
 };
 
 /** Display + command metadata per harness. Mirror of `agent_cli()` in repos.rs. */
@@ -91,6 +98,9 @@ export type DataInfo = {
 export type AppConfig = {
   hotkey: string;
   cache_ttl_seconds: number;
+  /** Minutes the popup reuses its in-memory repo list before re-reading the
+   * cache on show (0.5–24). Independent of `cache_ttl_seconds`. */
+  reload_throttle_minutes: number;
   wsl_distro: string | null;
   wsl_home: string | null;
   cache_path: string | null;

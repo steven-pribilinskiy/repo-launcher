@@ -8,27 +8,36 @@ use tauri_plugin_notification::NotificationExt;
 use super::config::load_config;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+// Unix seconds at compile time, embedded by build.rs — not the exe's on-disk
+// mtime, which drifts on install/AV-scan/sync without an actual rebuild.
+const BUILT_UNIX: &str = env!("REPO_LAUNCHER_BUILT_UNIX");
 
 #[derive(Serialize)]
 pub struct BuildInfo {
     pub version: String,
-    /// Unix seconds the executable was built (its on-disk modified time).
     pub built_unix: u64,
 }
 
-/// Version + build time (from the executable's mtime), for the settings footer.
+/// Version + build time (embedded at compile time), for the settings footer.
 #[tauri::command]
 pub fn app_build_info() -> BuildInfo {
-    let built_unix = std::env::current_exe()
-        .ok()
-        .and_then(|path| std::fs::metadata(path).ok())
-        .and_then(|meta| meta.modified().ok())
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|dur| dur.as_secs())
-        .unwrap_or(0);
     BuildInfo {
         version: VERSION.to_string(),
-        built_unix,
+        built_unix: BUILT_UNIX.parse().unwrap_or(0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_info_embeds_a_real_compile_time_not_the_zero_fallback() {
+        let info = app_build_info();
+        assert_eq!(info.version, VERSION);
+        // Sanity bound (year 2023+) — catches build.rs failing to set
+        // REPO_LAUNCHER_BUILT_UNIX and silently falling back to 0.
+        assert!(info.built_unix > 1_700_000_000);
     }
 }
 

@@ -5,6 +5,7 @@ import {
   CornerDownLeft,
   ExternalLink,
   FolderOpen,
+  RefreshCw,
   Sparkles,
   Terminal,
   X,
@@ -17,6 +18,7 @@ const UNGROUPED = "Other";
 /** A sensible icon per action: agent → spark, clipboard → copy, exec → guessed
  * from the program/label (terminal / file manager / editor), else external. */
 function actionIcon(action: ActionDef): LucideIcon {
+  if (action.kind === "system") return RefreshCw;
   if (action.kind === "agent") return Sparkles;
   if (action.kind === "clipboard") return Copy;
   const hay = `${action.label} ${action.program ?? ""}`.toLowerCase();
@@ -187,17 +189,23 @@ export function ActionsPalette({
                   >
                     <Icon className="h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-500" />
                     <span className="truncate">{action.label}</span>
-                    {keys.length > 0 && (
-                      <span className="ml-auto flex shrink-0 items-center gap-1">
-                        {keys.map((key, position) => (
-                          <kbd
-                            key={`${key}-${position}`}
-                            className="flex h-5 min-w-5 items-center justify-center rounded bg-zinc-200 px-1.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
-                          >
-                            {key === "Enter" ? "↵" : key}
-                          </kbd>
-                        ))}
+                    {action.rightLabel ? (
+                      <span className="ml-auto shrink-0 whitespace-nowrap text-[10px] tabular-nums text-zinc-400 dark:text-zinc-500">
+                        {action.rightLabel}
                       </span>
+                    ) : (
+                      keys.length > 0 && (
+                        <span className="ml-auto flex shrink-0 items-center gap-1">
+                          {keys.map((key, position) => (
+                            <kbd
+                              key={`${key}-${position}`}
+                              className="flex h-5 min-w-5 items-center justify-center rounded bg-zinc-200 px-1.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
+                            >
+                              {key === "Enter" ? "↵" : key}
+                            </kbd>
+                          ))}
+                        </span>
+                      )
                     )}
                   </button>
                 );

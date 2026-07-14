@@ -4,7 +4,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { api } from "@/lib/api";
 import { matchHotkey } from "@/lib/hotkey";
 import { useRepoStore } from "@/stores/repoStore";
-import type { ActionDef, FuzzyResult } from "@/types";
+import { SYSTEM_ACTION_REFRESH, type ActionDef, type FuzzyResult } from "@/types";
 
 type UseKeyboardNavOptions = {
   results: FuzzyResult[];
@@ -26,6 +26,7 @@ export function useKeyboardNav({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const config = useRepoStore((state) => state.config);
   const cycleSort = useRepoStore((state) => state.cycleSort);
+  const refresh = useRepoStore((state) => state.refresh);
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -37,6 +38,13 @@ export function useKeyboardNav({
 
   const runAction = useCallback(
     async (action: ActionDef) => {
+      // System actions (e.g. "Refresh repos cache") aren't repo-scoped and
+      // shouldn't hide the popup — the user stays to watch the list update.
+      if (action.kind === "system") {
+        if (action.id === SYSTEM_ACTION_REFRESH) void refresh();
+        onActionComplete();
+        return;
+      }
       const selected = results[selectedIndex]?.repo;
       if (!selected) return;
       try {
@@ -48,7 +56,7 @@ export function useKeyboardNav({
       await hideWindow();
       onActionComplete();
     },
-    [results, selectedIndex, hideWindow, onActionComplete],
+    [results, selectedIndex, hideWindow, onActionComplete, refresh],
   );
 
   const handleKeyDown = useCallback(

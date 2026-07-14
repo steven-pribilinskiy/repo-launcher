@@ -77,6 +77,11 @@ pub struct AppConfig {
     /// How stale (seconds) the cache may be before a background rebuild is kicked.
     #[serde(default = "default_ttl")]
     pub cache_ttl_seconds: u64,
+    /// How long (minutes) the popup reuses its in-memory repo list before
+    /// re-reading the cache on show. Independent of `cache_ttl_seconds`, which
+    /// gates the background rebuild rather than the popup's own re-read.
+    #[serde(default = "default_reload_throttle_minutes")]
+    pub reload_throttle_minutes: f64,
     /// Which WSL distro hosts the goto-repo cache (Windows only). None = autodetect.
     #[serde(default)]
     pub wsl_distro: Option<String>,
@@ -135,6 +140,9 @@ fn default_hotkey() -> String {
 fn default_ttl() -> u64 {
     300
 }
+fn default_reload_throttle_minutes() -> f64 {
+    1.0
+}
 fn default_theme() -> String {
     "system".to_string()
 }
@@ -147,6 +155,7 @@ impl Default for AppConfig {
         Self {
             hotkey: default_hotkey(),
             cache_ttl_seconds: default_ttl(),
+            reload_throttle_minutes: default_reload_throttle_minutes(),
             wsl_distro: None,
             wsl_home: None,
             cache_path: None,

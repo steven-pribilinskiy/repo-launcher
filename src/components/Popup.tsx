@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SearchInput } from "@/components/SearchInput";
@@ -9,11 +9,12 @@ import { ActionsPalette } from "@/components/ActionsPalette";
 import { ResizeHandles } from "@/components/ResizeHandles";
 import { useRepoSearch } from "@/hooks/useRepoSearch";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
-import { useRepoStore } from "@/stores/repoStore";
+import { useRepoStore, reloadThrottleMs } from "@/stores/repoStore";
 import { Onboarding } from "@/components/Onboarding";
 import { api } from "@/lib/api";
 import { applyTheme } from "@/lib/theme";
 import { repoName } from "@/lib/utils";
+import { SYSTEM_ACTION_REFRESH, type ActionDef, type ActionGroup } from "@/types";
 
 type View = "list" | "table";
 
@@ -27,6 +28,8 @@ const SORT_MODE_BY_COLUMN: Partial<Record<TableSortColumn, number>> = {
   uses: 2,
   type: 3,
 };
+
+const GRP_GENERAL: ActionGroup = { id: "grp-general", title: "General", kind: "plain" };
 
 // Keep the caret in the search field no matter where you click. preventDefault on
 // mousedown stops buttons / the list / drag handles from taking focus, so typing keeps
@@ -46,8 +49,19 @@ export default function Popup() {
   );
   const [paletteOpen, setPaletteOpen] = useState(false);
 
-  const { repos, isLoading, multiDistro, sortMode, config, loadConfig, loadRepos, cycleSort, setSort } =
-    useRepoStore();
+  const {
+    repos,
+    isLoading,
+    isRefreshing,
+    lastLoadAt,
+    multiDistro,
+    sortMode,
+    config,
+    loadConfig,
+    loadRepos,
+    cycleSort,
+    setSort,
+  } = useRepoStore();
 
   const results = useRepoSearch(query, repos);
 
@@ -89,6 +103,29 @@ export default function Popup() {
     },
     [setSort],
   );
+
+  // Ticks once a second while the palette is open, just to keep the "Refresh
+  // repos cache" row's countdown live — no need to re-render for it otherwise.
+  const [paletteNow, setPaletteNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!paletteOpen) return;
+    setPaletteNow(Date.now());
+    const id = window.setInterval(() => setPaletteNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [paletteOpen]);
+
+  const refreshAction: ActionDef = useMemo(() => {
+    const remainingSec = Math.max(0, Math.ceil((lastLoadAt + reloadThrottleMs(config) - paletteNow) / 1000));
+    return {
+      id: SYSTEM_ACTION_REFRESH,
+      label: isRefreshing ? "Refreshing repos cache…" : "Refresh repos cache",
+      hotkey: "",
+      enabled: true,
+      kind: "system",
+      group: GRP_GENERAL.id,
+      rightLabel: isRefreshing ? "" : remainingSec > 0 ? `auto in ${remainingSec}s` : "auto now",
+    };
+  }, [isRefreshing, lastLoadAt, paletteNow, config]);
 
   // Diagnostics: when the popup mounts and when it first paints, relative to
   // process start — to locate any post-startup UI delay (e.g. after tray Reload).
@@ -193,8 +230,8 @@ export default function Popup() {
       <ResizeHandles />
       {paletteOpen && (
         <ActionsPalette
-          actions={(config?.actions ?? []).filter((action) => action.enabled)}
-          groups={config?.groups ?? []}
+          actions={[...(config?.actions ?? []).filter((action) => action.enabled), refreshAction]}
+          groups={[...(config?.groups ?? []), GRP_GENERAL]}
           repoName={repoName(displayResults[selectedIndex]?.repo.path ?? "")}
           onRun={runAction}
           onClose={() => setPaletteOpen(false)}
