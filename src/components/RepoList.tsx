@@ -8,6 +8,8 @@ type RepoListProps = {
   selectedIndex: number;
   showDistro: boolean;
   onSelect: (index: number) => void;
+  /** Rendered in place of the rows when there are none. */
+  emptyState: React.ReactNode;
 };
 
 export function RepoList({
@@ -15,6 +17,7 @@ export function RepoList({
   selectedIndex,
   showDistro,
   onSelect,
+  emptyState,
 }: RepoListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -30,13 +33,7 @@ export function RepoList({
     virtualizer.scrollToIndex(selectedIndex, { align: "auto" });
   }, [selectedIndex, virtualizer]);
 
-  if (results.length === 0) {
-    return (
-      <div className="flex flex-1 items-center justify-center py-12 text-sm text-zinc-500">
-        No repos found
-      </div>
-    );
-  }
+  if (results.length === 0) return <>{emptyState}</>;
 
   return (
     <div ref={parentRef} className="repo-list flex-1 overflow-y-auto">

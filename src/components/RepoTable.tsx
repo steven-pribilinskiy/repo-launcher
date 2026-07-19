@@ -24,9 +24,19 @@ type RepoTableProps = {
   onSelect: (index: number) => void;
   sort: TableSort | null;
   onSort: (column: TableSortColumn) => void;
+  /** Rendered in place of the rows when there are none — the column headers stay
+   * visible so the view doesn't collapse. */
+  emptyState: React.ReactNode;
 };
 
-export function RepoTable({ results, selectedIndex, onSelect, sort, onSort }: RepoTableProps) {
+export function RepoTable({
+  results,
+  selectedIndex,
+  onSelect,
+  sort,
+  onSort,
+  emptyState,
+}: RepoTableProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: results.length,
@@ -83,9 +93,7 @@ export function RepoTable({ results, selectedIndex, onSelect, sort, onSort }: Re
       </div>
 
       {results.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-zinc-500">
-          No repos found
-        </div>
+        emptyState
       ) : (
         <div ref={parentRef} className="repo-list flex-1 overflow-y-auto">
           <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>

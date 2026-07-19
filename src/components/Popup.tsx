@@ -7,6 +7,7 @@ import { RepoTable, type TableSort, type TableSortColumn } from "@/components/Re
 import { ActionBar } from "@/components/ActionBar";
 import { ActionsPalette } from "@/components/ActionsPalette";
 import { ResizeHandles } from "@/components/ResizeHandles";
+import { EmptyState } from "@/components/EmptyState";
 import { useRepoSearch } from "@/hooks/useRepoSearch";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { useRepoStore, reloadThrottleMs } from "@/stores/repoStore";
@@ -53,12 +54,15 @@ export default function Popup() {
     repos,
     isLoading,
     isRefreshing,
+    error,
+    hasLoaded,
     lastLoadAt,
     multiDistro,
     sortMode,
     config,
     loadConfig,
     loadRepos,
+    refresh,
     cycleSort,
     setSort,
   } = useRepoStore();
@@ -192,6 +196,17 @@ export default function Popup() {
     return <Onboarding config={config} onDone={() => loadConfig()} />;
   }
 
+  const emptyState = (
+    <EmptyState
+      query={query}
+      error={error}
+      hasLoaded={hasLoaded}
+      isRefreshing={isRefreshing}
+      totalRepos={repos.length}
+      onRefresh={() => void refresh()}
+    />
+  );
+
   return (
     <div
       onMouseDown={keepSearchFocused}
@@ -206,6 +221,7 @@ export default function Popup() {
           onSelect={setSelectedIndex}
           sort={tableSort}
           onSort={onSort}
+          emptyState={emptyState}
         />
       ) : (
         <RepoList
@@ -213,6 +229,7 @@ export default function Popup() {
           selectedIndex={selectedIndex}
           showDistro={multiDistro}
           onSelect={setSelectedIndex}
+          emptyState={emptyState}
         />
       )}
       <ActionBar

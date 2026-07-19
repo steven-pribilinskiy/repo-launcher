@@ -15,6 +15,27 @@ export function reloadThrottleMs(config: AppConfig | null): number {
   return (config?.reload_throttle_minutes ?? DEFAULT_RELOAD_THROTTLE_MINUTES) * 60_000;
 }
 
+/** Ceiling on a single cache read. The cache can sit behind a WSL UNC share that
+ * stalls indefinitely (cold VM, dropped share) — an invoke that never settles
+ * would latch `isLoading` and freeze the repo list for the whole process
+ * lifetime, so every load is raced against this instead. */
+const READ_TIMEOUT_MS = 15_000;
+
+/** A rebuild walks the whole projects tree, so it gets a far longer budget than
+ * a plain read — long enough not to fail a healthy scan, short enough to still
+ * break a genuine hang. */
+const REBUILD_TIMEOUT_MS = 180_000;
+
+function withTimeout<T>(promise: Promise<T>, label: string, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(
+      () => reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`)),
+      timeoutMs,
+    );
+    promise.then(resolve, reject).finally(() => window.clearTimeout(timer));
+  });
+}
+
 type RepoStore = {
   repos: Repo[];
   isLoading: boolean;
@@ -24,6 +45,9 @@ type RepoStore = {
   sortMode: number;
   multiDistro: boolean;
   lastLoadAt: number;
+  /** True once a read has succeeded, so an empty list can be told apart from a
+   * load that has never completed. */
+  hasLoaded: boolean;
 
   loadConfig: () => Promise<void>;
   loadRepos: () => Promise<void>;
@@ -41,6 +65,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   sortMode: 2,
   multiDistro: false,
   lastLoadAt: 0,
+  hasLoaded: false,
 
   loadConfig: async () => {
     try {
@@ -52,22 +77,31 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   },
 
   loadRepos: async () => {
-    if (get().isLoading || Date.now() - get().lastLoadAt < reloadThrottleMs(get().config)) return;
+    if (get().isLoading || get().isRefreshing) return;
+    if (Date.now() - get().lastLoadAt < reloadThrottleMs(get().config)) return;
     set({ isLoading: true, error: null });
     try {
-      const [repos, sortMode] = await Promise.all([api.readRepos(), api.getSort()]);
+      const [repos, sortMode] = await withTimeout(
+        Promise.all([api.readRepos(), api.getSort()]),
+        "Reading the repo cache",
+        READ_TIMEOUT_MS,
+      );
       const distros = new Set(repos.map((repo) => repo.distro));
       set({
         repos,
         sortMode,
-        isLoading: false,
+        hasLoaded: true,
         multiDistro: distros.size > 1,
         lastLoadAt: Date.now(),
       });
       // Kick a background rebuild if the cache is stale; next open sees it fresh.
       api.maybeRefresh().catch(() => {});
     } catch (error) {
-      set({ error: String(error), isLoading: false });
+      // Leave lastLoadAt untouched so the next open retries instead of serving a
+      // stale list behind the throttle.
+      set({ error: String(error) });
+    } finally {
+      set({ isLoading: false });
     }
   },
 
@@ -76,17 +110,22 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   refresh: async () => {
     set({ isLoading: true, isRefreshing: true, error: null });
     try {
-      const repos = await api.refreshRepos();
+      const repos = await withTimeout(
+        api.refreshRepos(),
+        "Rebuilding the repo cache",
+        REBUILD_TIMEOUT_MS,
+      );
       const distros = new Set(repos.map((repo) => repo.distro));
       set({
         repos,
-        isLoading: false,
-        isRefreshing: false,
+        hasLoaded: true,
         multiDistro: distros.size > 1,
         lastLoadAt: Date.now(),
       });
     } catch (error) {
-      set({ error: String(error), isLoading: false, isRefreshing: false });
+      set({ error: String(error) });
+    } finally {
+      set({ isLoading: false, isRefreshing: false });
     }
   },
 
