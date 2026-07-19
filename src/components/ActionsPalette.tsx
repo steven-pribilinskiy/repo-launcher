@@ -135,7 +135,13 @@ export function ActionsPalette({
       <div className="mx-auto mt-10 flex max-h-[80%] w-[88%] flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
         <div className="flex items-center gap-2 border-b border-zinc-200 px-3 py-2.5 dark:border-zinc-800">
           <span className="truncate text-xs text-zinc-400 dark:text-zinc-500">
-            Actions · <span className="text-zinc-600 dark:text-zinc-300">{repoName}</span>
+            Actions
+            {repoName && (
+              <>
+                {" · "}
+                <span className="text-zinc-600 dark:text-zinc-300">{repoName}</span>
+              </>
+            )}
           </span>
           <div className="relative ml-auto">
             <input

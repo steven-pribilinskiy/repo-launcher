@@ -32,6 +32,9 @@ type ActionBarProps = {
   sortMode: number;
   view: "list" | "table";
   onToggleView: () => void;
+  /** False when the list is empty — repo-scoped actions are hidden, since there's
+   * nothing for them to act on. */
+  hasSelection: boolean;
 };
 
 function Kbd({ children }: { children: ReactNode }) {
@@ -55,6 +58,7 @@ export function ActionBar({
   sortMode,
   view,
   onToggleView,
+  hasSelection,
 }: ActionBarProps) {
   const enabled = actions.filter((action) => action.enabled);
   const primary =
@@ -68,7 +72,7 @@ export function ActionBar({
       className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 border-t border-zinc-200 px-3 py-2 dark:border-zinc-700/50"
     >
       <div className="flex shrink-0 items-center gap-2">
-        {primary && (
+        {hasSelection && primary && (
           <button
             type="button"
             onClick={() => onRun(primary)}

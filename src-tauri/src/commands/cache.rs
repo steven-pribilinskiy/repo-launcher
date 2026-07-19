@@ -158,6 +158,116 @@ fn history_file(config: &AppConfig) -> Result<PathBuf, String> {
     Ok(goto_dirs(config)?.1.join("history"))
 }
 
+/// Which goto-repo directory a file lives in.
+#[derive(Clone, Copy)]
+enum CacheDir {
+    /// `~/.cache/goto-repo` — holds repos.tsv and sort.
+    Cache,
+    /// `~/.config/goto-repo` — holds history.
+    Config,
+}
+
+/// The WSL POSIX cache/config dirs, for the `wsl.exe cat` read fallback. Present
+/// only on Windows when resolving the default (non-override) path — an explicit
+/// `cache_path` override has no known POSIX equivalent.
+#[cfg(target_os = "windows")]
+fn wsl_posix_dirs(config: &AppConfig) -> Option<(String, String)> {
+    if config.cache_path.as_deref().map(|path| !path.trim().is_empty()).unwrap_or(false) {
+        return None;
+    }
+    let distro = resolve_distro(config);
+    let home = match config.wsl_home.as_deref() {
+        Some(cached) if !cached.trim().is_empty() => cached.to_string(),
+        _ => wsl_home(&distro).ok()?,
+    };
+    Some((
+        format!("{}/.cache/goto-repo", home),
+        format!("{}/.config/goto-repo", home),
+    ))
+}
+
+/// No WSL fallback off Windows — the direct read is already the real file.
+#[cfg(not(target_os = "windows"))]
+fn wsl_posix_dirs(_config: &AppConfig) -> Option<(String, String)> {
+    None
+}
+
+/// Read a file's contents via `wsl.exe -d <distro> -- cat <posix>`. Immune to the
+/// Windows-side 9P directory cache going stale — which makes a file that exists in
+/// WSL read as "not found" over the `\\wsl.localhost` UNC share (the file is
+/// rewritten inside WSL by `find-repo --rebuild`, so Windows caches an old view of
+/// the directory and never sees the current inode).
+#[cfg(target_os = "windows")]
+fn wsl_cat(distro: &str, posix_path: &str) -> Result<String, String> {
+    use std::os::windows::process::CommandExt;
+    let output = Command::new("wsl")
+        .args(["-d", distro, "--", "cat", posix_path])
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .output()
+        .map_err(|err| format!("wsl cat {} failed: {}", posix_path, err))?;
+    if !output.status.success() {
+        return Err(format!(
+            "wsl cat {} exited {}",
+            posix_path,
+            output.status.code().unwrap_or(-1)
+        ));
+    }
+    Ok(super::repos::decode_wsl_output(&output.stdout))
+}
+
+/// `stat` a WSL file via `wsl.exe` — returns (size_bytes, mtime_unix). Lets the
+/// Data tab report a present file honestly when the UNC metadata read is blinded
+/// by a stale 9P cache.
+#[cfg(target_os = "windows")]
+fn wsl_stat(distro: &str, posix_path: &str) -> Option<(u64, u64)> {
+    use std::os::windows::process::CommandExt;
+    let output = Command::new("wsl")
+        .args(["-d", distro, "--", "stat", "-c", "%s %Y", posix_path])
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = super::repos::decode_wsl_output(&output.stdout);
+    let mut parts = text.trim().split_whitespace();
+    let size = parts.next()?.parse::<u64>().ok()?;
+    let mtime = parts.next()?.parse::<u64>().ok()?;
+    Some((size, mtime))
+}
+
+/// Read a goto-repo file as a string. Tries the direct path first (UNC on Windows,
+/// native elsewhere — fast, no subprocess); on Windows, if that fails, falls back
+/// to `wsl.exe cat` so a stale 9P cache can't hide a file that genuinely exists.
+fn read_cache_string(config: &AppConfig, which: CacheDir, file_name: &str) -> Result<String, String> {
+    let (cache_dir, config_dir) = goto_dirs(config)?;
+    let dir = match which {
+        CacheDir::Cache => cache_dir,
+        CacheDir::Config => config_dir,
+    };
+    let path = dir.join(file_name);
+    let direct = std::fs::read_to_string(&path);
+    #[cfg(target_os = "windows")]
+    if let Err(direct_err) = &direct {
+        if let Some((cache_posix, config_posix)) = wsl_posix_dirs(config) {
+            let posix_dir = match which {
+                CacheDir::Cache => cache_posix,
+                CacheDir::Config => config_posix,
+            };
+            let posix_path = format!("{}/{}", posix_dir, file_name);
+            if let Ok(content) = wsl_cat(&resolve_distro(config), &posix_path) {
+                log::info!(
+                    "read_cache_string: direct read of {} failed ({}); used wsl.exe cat",
+                    path.display(),
+                    direct_err
+                );
+                return Ok(content);
+            }
+        }
+    }
+    direct.map_err(|err| format!("Cannot read {}: {}", path.display(), err))
+}
+
 /// Parse repos.tsv (skip the header line; lines are `<type>\t<path>`).
 fn parse_cache(content: &str, distro: &str) -> Vec<Repo> {
     content
@@ -183,18 +293,21 @@ fn parse_cache(content: &str, distro: &str) -> Vec<Repo> {
 }
 
 fn read_repo_cache(config: &AppConfig) -> Result<Vec<Repo>, String> {
-    let tsv = repos_tsv(config)?;
     let distro = resolve_distro(config);
-    if !tsv.exists() {
-        // First run with no cache yet — build it once, blocking.
-        let _ = run_rebuild(config, true);
-    }
     let read = Instant::now();
-    let content = std::fs::read_to_string(&tsv)
-        .map_err(|err| format!("Cannot read {}: {}", tsv.display(), err))?;
+    // Try to read what's there (with the wsl.exe fallback). Only if nothing is
+    // readable — genuinely missing, not merely hidden by a stale 9P cache — do we
+    // pay for a blocking rebuild, then read again.
+    let content = match read_cache_string(config, CacheDir::Cache, "repos.tsv") {
+        Ok(content) => content,
+        Err(first_err) => {
+            log::info!("read_repo_cache: no cache readable ({}); rebuilding once", first_err);
+            let _ = run_rebuild(config, true);
+            read_cache_string(config, CacheDir::Cache, "repos.tsv")?
+        }
+    };
     log::info!(
-        "read_repo_cache: read {} ({} bytes) in {} ms",
-        tsv.display(),
+        "read_repo_cache: read repos.tsv ({} bytes) in {} ms",
         content.len(),
         read.elapsed().as_millis()
     );
@@ -204,10 +317,7 @@ fn read_repo_cache(config: &AppConfig) -> Result<Vec<Repo>, String> {
 /// path -> (usage count, most-recent timestamp), aggregated from history.
 fn read_history_stats(config: &AppConfig) -> HashMap<String, (u64, u64)> {
     let mut stats: HashMap<String, (u64, u64)> = HashMap::new();
-    let Ok(path) = history_file(config) else {
-        return stats;
-    };
-    let Ok(content) = std::fs::read_to_string(path) else {
+    let Ok(content) = read_cache_string(config, CacheDir::Config, "history") else {
         return stats;
     };
     for line in content.lines() {
@@ -227,9 +337,8 @@ fn read_history_stats(config: &AppConfig) -> HashMap<String, (u64, u64)> {
 }
 
 pub fn read_sort_mode(config: &AppConfig) -> u8 {
-    sort_file(config)
+    read_cache_string(config, CacheDir::Cache, "sort")
         .ok()
-        .and_then(|path| std::fs::read_to_string(path).ok())
         .and_then(|raw| raw.trim().parse::<u8>().ok())
         .filter(|mode| *mode <= 3)
         .unwrap_or(2)
@@ -471,12 +580,41 @@ fn path_stat(path: &Path) -> PathStat {
     }
 }
 
+/// Stat a goto-repo file for the Data tab. On Windows, if the direct (UNC) read
+/// reports the file absent, re-check via `wsl.exe stat` so a stale 9P cache
+/// doesn't make a present file look missing (matching what the read path does).
+fn goto_file_stat(direct: &Path, posix_path: Option<String>, distro: &str) -> PathStat {
+    let stat = path_stat(direct);
+    #[cfg(target_os = "windows")]
+    if !stat.exists {
+        if let Some(posix) = &posix_path {
+            if let Some((size, mtime)) = wsl_stat(distro, posix) {
+                return PathStat {
+                    path: direct.display().to_string(),
+                    exists: true,
+                    size,
+                    modified_unix: mtime,
+                };
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = (posix_path, distro);
+    stat
+}
+
 /// Everything that drives the app: the goto-repo files it reads, their sizes, the
 /// resolved distro, the sort mode, and the most-used paths from history.
 #[tauri::command]
 pub fn data_info(app: AppHandle) -> Result<DataInfo, String> {
     let config = load_config(&app)?;
     let (cache_dir, config_dir) = goto_dirs(&config)?;
+    let distro = resolve_distro(&config);
+    let (cache_posix, config_posix) = match wsl_posix_dirs(&config) {
+        Some((cache, config_dir)) => (Some(cache), Some(config_dir)),
+        None => (None, None),
+    };
+    let posix_join = |dir: &Option<String>, name: &str| dir.as_ref().map(|dir| format!("{}/{}", dir, name));
     let repos = read_repo_cache(&config).unwrap_or_default();
     let stats = read_history_stats(&config);
     let sort_mode = read_sort_mode(&config);
@@ -506,13 +644,13 @@ pub fn data_info(app: AppHandle) -> Result<DataInfo, String> {
         .unwrap_or_else(|_| PathBuf::from("repo-launcher.log"));
 
     Ok(DataInfo {
-        distro: resolve_distro(&config),
         cache_dir: cache_dir.display().to_string(),
         config_dir: config_dir.display().to_string(),
-        repos_tsv: path_stat(&cache_dir.join("repos.tsv")),
-        sort_file: path_stat(&cache_dir.join("sort")),
-        history_file: path_stat(&config_dir.join("history")),
+        repos_tsv: goto_file_stat(&cache_dir.join("repos.tsv"), posix_join(&cache_posix, "repos.tsv"), &distro),
+        sort_file: goto_file_stat(&cache_dir.join("sort"), posix_join(&cache_posix, "sort"), &distro),
+        history_file: goto_file_stat(&config_dir.join("history"), posix_join(&config_posix, "history"), &distro),
         log_file: path_stat(&log_path),
+        distro,
         repo_count: repos.len(),
         sort_mode,
         sort_label: labels.get(sort_mode as usize).unwrap_or(&"?").to_string(),

@@ -196,6 +196,12 @@ export default function Popup() {
     return <Onboarding config={config} onDone={() => loadConfig()} />;
   }
 
+  // Repo-scoped actions (copy/open/agent) only make sense with a repo in hand;
+  // when the list is empty we surface just the global ones (Rebuild cache).
+  const hasSelection = displayResults.length > 0;
+  const enabledActions = (config?.actions ?? []).filter((action) => action.enabled);
+  const paletteActions = hasSelection ? [...enabledActions, refreshAction] : [refreshAction];
+
   const emptyState = (
     <EmptyState
       query={query}
@@ -243,11 +249,12 @@ export default function Popup() {
         sortMode={sortMode}
         view={view}
         onToggleView={toggleView}
+        hasSelection={hasSelection}
       />
       <ResizeHandles />
       {paletteOpen && (
         <ActionsPalette
-          actions={[...(config?.actions ?? []).filter((action) => action.enabled), refreshAction]}
+          actions={paletteActions}
           groups={[...(config?.groups ?? []), GRP_GENERAL]}
           repoName={repoName(displayResults[selectedIndex]?.repo.path ?? "")}
           onRun={runAction}
