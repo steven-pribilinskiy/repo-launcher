@@ -380,10 +380,17 @@ fn write_cache_string(
     direct.map_err(|err| format!("Cannot write {}: {}", path.display(), err))
 }
 
-/// Sentinel that separates files in a batched `wsl.exe` read. Line-framed rather
-/// than byte-framed because `decode_wsl_output` may re-encode the stream, which
-/// would invalidate any byte count taken on the WSL side.
-const BATCH_MARK: &str = "@@repo-launcher:";
+/// `tail -v` writes `==> <path> <==` before each file; that header is the framing
+/// for a batched read.
+///
+/// The batch deliberately runs NO shell. `wsl.exe` substitutes environment
+/// variables into the command line it forwards and blanks everything else, so a
+/// `bash -c` script's own variables (`$p`, `"$@"`, a loop variable) arrive empty,
+/// and positional arguments after the script are dropped entirely. Both failures
+/// are silent — the script runs and produces empty results. Plain argv avoids all
+/// of it.
+const TAIL_HEADER_OPEN: &str = "==> ";
+const TAIL_HEADER_CLOSE: &str = " <==";
 
 /// Split a batched read's output back into per-file contents. Kept apart from the
 /// spawn so the framing is testable on any platform: a mis-split here would hand
@@ -394,8 +401,8 @@ fn parse_batch_output(text: &str, wanted: &[(String, String)]) -> HashMap<String
     let mut buffer = String::new();
     for line in text.lines() {
         if let Some(path) = line
-            .strip_prefix(BATCH_MARK)
-            .and_then(|rest| rest.strip_suffix("@@"))
+            .strip_prefix(TAIL_HEADER_OPEN)
+            .and_then(|rest| rest.strip_suffix(TAIL_HEADER_CLOSE))
         {
             if let Some(previous) = current.take() {
                 by_path.insert(previous, std::mem::take(&mut buffer));
@@ -434,13 +441,8 @@ fn wsl_cat_many(distro: &str, posix_paths: &[(String, String)]) -> Result<HashMa
     if posix_paths.is_empty() {
         return Ok(HashMap::new());
     }
-    // `$@` keeps every path a separate argv element, so no quoting is involved.
-    let script = format!(
-        r#"for p in "$@"; do printf '{}%s@@\n' "$p"; if [ -r "$p" ]; then cat "$p"; fi; done"#,
-        BATCH_MARK
-    );
     let mut command = Command::new("wsl");
-    command.args(["-d", distro, "--", "bash", "-lc", &script, "_"]);
+    command.args(["-d", distro, "--", "tail", "-v", "-n", "+1"]);
     for (_, posix) in posix_paths {
         command.arg(posix);
     }
@@ -448,9 +450,11 @@ fn wsl_cat_many(distro: &str, posix_paths: &[(String, String)]) -> Result<HashMa
         .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
         .output()
         .map_err(|err| format!("wsl batch read failed: {}", err))?;
-    if !output.status.success() {
+    // A missing file makes tail exit non-zero while still emitting the files it
+    // could read, so the status is not a reason to discard the output.
+    if output.stdout.is_empty() {
         return Err(format!(
-            "wsl batch read exited {}",
+            "wsl batch read produced nothing (exit {})",
             output.status.code().unwrap_or(-1)
         ));
     }
@@ -533,6 +537,18 @@ fn fill_bundle_from_wsl(config: &AppConfig, mut bundle: CacheBundle) -> CacheBun
             }
         }
         Err(err) => log::info!("read_cache_bundle: batch read failed ({})", err),
+    }
+    // The batch is an optimisation, never the only route: anything it didn't
+    // return falls back to the per-file read. Without this a batch that comes
+    // back empty takes the whole repo list down with it.
+    if bundle.repos_tsv.is_none() {
+        bundle.repos_tsv = read_cache_string(config, CacheDir::Cache, "repos.tsv").ok();
+    }
+    if bundle.sort.is_none() {
+        bundle.sort = read_cache_string(config, CacheDir::Cache, "sort").ok();
+    }
+    if bundle.history.is_none() {
+        bundle.history = read_cache_string(config, CacheDir::Config, "history").ok();
     }
     bundle
 }
@@ -1069,14 +1085,16 @@ mod tests {
         ]
     }
 
+    /// Exactly what `wsl.exe -- tail -v -n +1 <files>` emits, blank separator
+    /// lines and all.
     #[test]
-    fn parse_batch_output_splits_each_file_at_its_marker() {
+    fn parse_batch_output_splits_each_file_at_its_tail_header() {
         let text = concat!(
-            "@@repo-launcher:/home/me/.cache/goto-repo/repos.tsv@@\n",
+            "==> /home/me/.cache/goto-repo/repos.tsv <==\n",
             "2 repos\nrepo\t/home/me/a\nrepo\t/home/me/b\n",
-            "@@repo-launcher:/home/me/.cache/goto-repo/sort@@\n",
+            "\n==> /home/me/.cache/goto-repo/sort <==\n",
             "3\n",
-            "@@repo-launcher:/home/me/.config/goto-repo/history@@\n",
+            "\n==> /home/me/.config/goto-repo/history <==\n",
             "111\t/home/me/a\n",
         );
         let found = parse_batch_output(text, &wanted());
@@ -1090,35 +1108,43 @@ mod tests {
     }
 
     #[test]
-    fn parse_batch_output_omits_a_file_that_produced_no_content() {
-        // An unreadable file emits its marker and nothing else; it must be absent
-        // rather than present-and-empty, so the caller can tell them apart.
+    fn parse_batch_output_omits_a_file_tail_could_not_read() {
+        // tail writes the error to stderr and emits no header for that file.
         let text = concat!(
-            "@@repo-launcher:/home/me/.cache/goto-repo/repos.tsv@@\n",
+            "==> /home/me/.cache/goto-repo/repos.tsv <==\n",
             "1 repos\nrepo\t/home/me/a\n",
-            "@@repo-launcher:/home/me/.cache/goto-repo/sort@@\n",
-            "@@repo-launcher:/home/me/.config/goto-repo/history@@\n",
+            "\n==> /home/me/.config/goto-repo/history <==\n",
             "111\t/home/me/a\n",
         );
         let found = parse_batch_output(text, &wanted());
-        assert!(!found.contains_key("sort"), "empty file must not be reported as read");
+        assert!(!found.contains_key("sort"), "unread file must be absent, not empty");
         assert!(found.contains_key("repos.tsv") && found.contains_key("history"));
     }
 
+    /// The regression that shipped in v0.11.0: the batch returned a well-formed
+    /// but EMPTY result, and an empty map must never look like a successful read.
     #[test]
-    fn parse_batch_output_keeps_content_that_looks_like_a_marker_prefix() {
-        // A repo path can legitimately start with '@@' — only an exact
-        // marker-wrapped line may split a section.
+    fn parse_batch_output_yields_nothing_when_every_section_is_empty() {
         let text = concat!(
-            "@@repo-launcher:/home/me/.cache/goto-repo/repos.tsv@@\n",
-            "1 repos\nrepo\t/home/me/@@repo-launcher:not-a-marker\n",
-            "@@repo-launcher:/home/me/.cache/goto-repo/sort@@\n",
+            "==> /home/me/.cache/goto-repo/repos.tsv <==\n",
+            "==> /home/me/.cache/goto-repo/sort <==\n",
+            "==> /home/me/.config/goto-repo/history <==\n",
+        );
+        assert!(parse_batch_output(text, &wanted()).is_empty());
+    }
+
+    #[test]
+    fn parse_batch_output_keeps_content_that_resembles_a_header() {
+        let text = concat!(
+            "==> /home/me/.cache/goto-repo/repos.tsv <==\n",
+            "1 repos\nrepo\t/home/me/==> odd <==x\n",
+            "\n==> /home/me/.cache/goto-repo/sort <==\n",
             "1\n",
         );
         let found = parse_batch_output(text, &wanted());
         let repos = parse_cache(&found["repos.tsv"], "Ubuntu");
         assert_eq!(repos.len(), 1);
-        assert_eq!(repos[0].path, "/home/me/@@repo-launcher:not-a-marker");
+        assert_eq!(repos[0].path, "/home/me/==> odd <==x");
         assert_eq!(parse_sort_mode(&found["sort"]), 1);
     }
 
