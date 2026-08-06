@@ -103,6 +103,9 @@ export type DataInfo = {
   sort_label: string;
   unique_paths: number;
   history_entries: number;
+  /** True when the cache is being read through wsl.exe because the direct UNC
+   * path is unreadable — working, but a subprocess per read. */
+  uses_wsl_fallback: boolean;
   top_used: TopUsed[];
 };
 

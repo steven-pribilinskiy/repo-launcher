@@ -682,6 +682,21 @@ function DataTab() {
         </button>
       </div>
 
+      {data.uses_wsl_fallback && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-700/60 dark:bg-amber-950/30">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div className="text-xs text-amber-900 dark:text-amber-200">
+            <p className="font-medium">Reading the cache through wsl.exe</p>
+            <p className="mt-1">
+              Windows can’t see these files over <code>\\wsl.localhost</code>, so each read runs a
+              WSL subprocess instead. Everything works — the popup just opens a little slower. This
+              usually means Windows is holding a stale view of the directory; a{" "}
+              <code>wsl --shutdown</code> clears it, but it closes every running WSL session first.
+            </p>
+          </div>
+        </div>
+      )}
+
       <FileCard title="Repos cache" stat={data.repos_tsv} extra={`${data.repo_count} repos`} />
       <FileCard
         title="Sort"

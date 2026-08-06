@@ -380,6 +380,188 @@ fn write_cache_string(
     direct.map_err(|err| format!("Cannot write {}: {}", path.display(), err))
 }
 
+/// Sentinel that separates files in a batched `wsl.exe` read. Line-framed rather
+/// than byte-framed because `decode_wsl_output` may re-encode the stream, which
+/// would invalidate any byte count taken on the WSL side.
+const BATCH_MARK: &str = "@@repo-launcher:";
+
+/// Split a batched read's output back into per-file contents. Kept apart from the
+/// spawn so the framing is testable on any platform: a mis-split here would hand
+/// one file's bytes to another parser, which no type would catch.
+fn parse_batch_output(text: &str, wanted: &[(String, String)]) -> HashMap<String, String> {
+    let mut by_path: HashMap<String, String> = HashMap::new();
+    let mut current: Option<String> = None;
+    let mut buffer = String::new();
+    for line in text.lines() {
+        if let Some(path) = line
+            .strip_prefix(BATCH_MARK)
+            .and_then(|rest| rest.strip_suffix("@@"))
+        {
+            if let Some(previous) = current.take() {
+                by_path.insert(previous, std::mem::take(&mut buffer));
+            }
+            current = Some(path.to_string());
+            continue;
+        }
+        if current.is_some() {
+            buffer.push_str(line);
+            buffer.push('\n');
+        }
+    }
+    if let Some(previous) = current {
+        by_path.insert(previous, buffer);
+    }
+    // Re-key by the caller's file name, dropping anything that came back empty
+    // (an unreadable file emits its marker and no content).
+    wanted
+        .iter()
+        .filter_map(|(name, posix)| {
+            by_path
+                .get(posix)
+                .filter(|content| !content.trim().is_empty())
+                .map(|content| (name.clone(), content.clone()))
+        })
+        .collect()
+}
+
+/// Read several WSL files in ONE `wsl.exe` spawn. Each spawn cold-costs ~100ms and
+/// the popup needs three files, so reading them separately triples the startup
+/// penalty on a machine whose UNC share is unusable. Missing files are simply
+/// absent from the returned map.
+#[cfg(target_os = "windows")]
+fn wsl_cat_many(distro: &str, posix_paths: &[(String, String)]) -> Result<HashMap<String, String>, String> {
+    use std::os::windows::process::CommandExt;
+    if posix_paths.is_empty() {
+        return Ok(HashMap::new());
+    }
+    // `$@` keeps every path a separate argv element, so no quoting is involved.
+    let script = format!(
+        r#"for p in "$@"; do printf '{}%s@@\n' "$p"; if [ -r "$p" ]; then cat "$p"; fi; done"#,
+        BATCH_MARK
+    );
+    let mut command = Command::new("wsl");
+    command.args(["-d", distro, "--", "bash", "-lc", &script, "_"]);
+    for (_, posix) in posix_paths {
+        command.arg(posix);
+    }
+    let output = command
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .output()
+        .map_err(|err| format!("wsl batch read failed: {}", err))?;
+    if !output.status.success() {
+        return Err(format!(
+            "wsl batch read exited {}",
+            output.status.code().unwrap_or(-1)
+        ));
+    }
+    let text = super::repos::decode_wsl_output(&output.stdout);
+    Ok(parse_batch_output(&text, posix_paths))
+}
+
+/// The three goto-repo files the popup needs, read together.
+struct CacheBundle {
+    repos_tsv: Option<String>,
+    sort: Option<String>,
+    history: Option<String>,
+    /// True when the direct (UNC) path failed and `wsl.exe` supplied the contents —
+    /// surfaced in the Data tab so the degraded mode isn't invisible.
+    used_fallback: bool,
+}
+
+/// Read repos.tsv + sort + history in as few round trips as possible: direct reads
+/// first, then a SINGLE batched `wsl.exe` call for whatever the direct path
+/// couldn't produce.
+fn read_cache_bundle(config: &AppConfig) -> CacheBundle {
+    // Deliberately NOT read_cache_string: its per-file wsl.exe fallback would spawn
+    // once per file. Read the direct path only, then pool every miss into one call.
+    let raw = |dir: CacheDir, name: &str| -> Option<String> {
+        let dirs = goto_dirs(config).ok()?;
+        let base = match dir {
+            CacheDir::Cache => dirs.0,
+            CacheDir::Config => dirs.1,
+        };
+        std::fs::read_to_string(base.join(name)).ok()
+    };
+    let bundle = CacheBundle {
+        repos_tsv: raw(CacheDir::Cache, "repos.tsv"),
+        sort: raw(CacheDir::Cache, "sort"),
+        history: raw(CacheDir::Config, "history"),
+        used_fallback: false,
+    };
+    #[cfg(target_os = "windows")]
+    let bundle = fill_bundle_from_wsl(config, bundle);
+    bundle
+}
+
+/// Fill whatever the direct read couldn't produce, in a single `wsl.exe` spawn.
+#[cfg(target_os = "windows")]
+fn fill_bundle_from_wsl(config: &AppConfig, mut bundle: CacheBundle) -> CacheBundle {
+    if bundle.repos_tsv.is_some() && bundle.sort.is_some() && bundle.history.is_some() {
+        return bundle;
+    }
+    let Some((cache_posix, config_posix)) = wsl_posix_dirs(config) else {
+        return bundle;
+    };
+    let mut wanted: Vec<(String, String)> = Vec::new();
+    if bundle.repos_tsv.is_none() {
+        wanted.push(("repos.tsv".into(), format!("{}/repos.tsv", cache_posix)));
+    }
+    if bundle.sort.is_none() {
+        wanted.push(("sort".into(), format!("{}/sort", cache_posix)));
+    }
+    if bundle.history.is_none() {
+        wanted.push(("history".into(), format!("{}/history", config_posix)));
+    }
+    let started = Instant::now();
+    match wsl_cat_many(&resolve_distro(config), &wanted) {
+        Ok(found) => {
+            bundle.used_fallback = true;
+            log::info!(
+                "read_cache_bundle: {} of {} file(s) via one wsl.exe batch in {} ms",
+                found.len(),
+                wanted.len(),
+                started.elapsed().as_millis()
+            );
+            if let Some(content) = found.get("repos.tsv") {
+                bundle.repos_tsv = Some(content.clone());
+            }
+            if let Some(content) = found.get("sort") {
+                bundle.sort = Some(content.clone());
+            }
+            if let Some(content) = found.get("history") {
+                bundle.history = Some(content.clone());
+            }
+        }
+        Err(err) => log::info!("read_cache_bundle: batch read failed ({})", err),
+    }
+    bundle
+}
+
+/// The full ranked list, from a single bundle read. Rebuilds once and retries when
+/// repos.tsv is genuinely unreadable (not merely hidden behind a stale 9P cache).
+fn ranked_repos(config: &AppConfig) -> Result<Vec<Repo>, String> {
+    let started = Instant::now();
+    let mut bundle = read_cache_bundle(config);
+    if bundle.repos_tsv.is_none() {
+        log::info!("ranked_repos: no cache readable; rebuilding once");
+        let _ = run_rebuild(config, true);
+        bundle = read_cache_bundle(config);
+    }
+    let content = bundle
+        .repos_tsv
+        .ok_or_else(|| "Cannot read repos.tsv from the goto-repo cache".to_string())?;
+    let repos = parse_cache(&content, &resolve_distro(config));
+    let mode = bundle.sort.as_deref().map(parse_sort_mode).unwrap_or(DEFAULT_SORT_MODE);
+    let stats = bundle.history.as_deref().map(parse_history_stats).unwrap_or_default();
+    log::info!(
+        "ranked_repos: {} repos ready in {} ms (fallback={})",
+        repos.len(),
+        started.elapsed().as_millis(),
+        bundle.used_fallback
+    );
+    Ok(rank_with(mode, &stats, repos))
+}
+
 /// Parse repos.tsv (skip the header line; lines are `<type>\t<path>`).
 fn parse_cache(content: &str, distro: &str) -> Vec<Repo> {
     content
@@ -404,34 +586,9 @@ fn parse_cache(content: &str, distro: &str) -> Vec<Repo> {
         .collect()
 }
 
-fn read_repo_cache(config: &AppConfig) -> Result<Vec<Repo>, String> {
-    let distro = resolve_distro(config);
-    let read = Instant::now();
-    // Try to read what's there (with the wsl.exe fallback). Only if nothing is
-    // readable — genuinely missing, not merely hidden by a stale 9P cache — do we
-    // pay for a blocking rebuild, then read again.
-    let content = match read_cache_string(config, CacheDir::Cache, "repos.tsv") {
-        Ok(content) => content,
-        Err(first_err) => {
-            log::info!("read_repo_cache: no cache readable ({}); rebuilding once", first_err);
-            let _ = run_rebuild(config, true);
-            read_cache_string(config, CacheDir::Cache, "repos.tsv")?
-        }
-    };
-    log::info!(
-        "read_repo_cache: read repos.tsv ({} bytes) in {} ms",
-        content.len(),
-        read.elapsed().as_millis()
-    );
-    Ok(parse_cache(&content, &distro))
-}
-
 /// path -> (usage count, most-recent timestamp), aggregated from history.
-fn read_history_stats(config: &AppConfig) -> HashMap<String, (u64, u64)> {
+fn parse_history_stats(content: &str) -> HashMap<String, (u64, u64)> {
     let mut stats: HashMap<String, (u64, u64)> = HashMap::new();
-    let Ok(content) = read_cache_string(config, CacheDir::Config, "history") else {
-        return stats;
-    };
     for line in content.lines() {
         let mut parts = line.splitn(2, '\t');
         let ts = parts.next().unwrap_or("").trim().parse::<u64>().unwrap_or(0);
@@ -451,9 +608,18 @@ fn read_history_stats(config: &AppConfig) -> HashMap<String, (u64, u64)> {
 pub fn read_sort_mode(config: &AppConfig) -> u8 {
     read_cache_string(config, CacheDir::Cache, "sort")
         .ok()
-        .and_then(|raw| raw.trim().parse::<u8>().ok())
+        .map(|raw| parse_sort_mode(&raw))
+        .unwrap_or(DEFAULT_SORT_MODE)
+}
+
+const DEFAULT_SORT_MODE: u8 = 2;
+
+fn parse_sort_mode(raw: &str) -> u8 {
+    raw.trim()
+        .parse::<u8>()
+        .ok()
         .filter(|mode| *mode <= 3)
-        .unwrap_or(2)
+        .unwrap_or(DEFAULT_SORT_MODE)
 }
 
 fn write_sort_mode(config: &AppConfig, mode: u8) -> Result<(), String> {
@@ -480,9 +646,7 @@ fn rank_by(mode: u8, mut repos: Vec<Repo>, stats: &HashMap<String, (u64, u64)>) 
     repos
 }
 
-fn rank(config: &AppConfig, mut repos: Vec<Repo>) -> Vec<Repo> {
-    let mode = read_sort_mode(config);
-    let stats = read_history_stats(config);
+fn rank_with(mode: u8, stats: &HashMap<String, (u64, u64)>, mut repos: Vec<Repo>) -> Vec<Repo> {
     // Attach usage stats to every repo so the table view can show/sort by them.
     for repo in repos.iter_mut() {
         if let Some((uses, last)) = stats.get(&repo.path) {
@@ -490,7 +654,7 @@ fn rank(config: &AppConfig, mut repos: Vec<Repo>) -> Vec<Repo> {
             repo.last_used = *last;
         }
     }
-    rank_by(mode, repos, &stats)
+    rank_by(mode, repos, stats)
 }
 
 /// Build the rebuild command (program + args) from config or per-OS default.
@@ -561,17 +725,8 @@ pub fn append_history(config: &AppConfig, repo_path: &str) -> Result<(), String>
 /// Read the goto-repo cache and return it ranked by the shared sort mode.
 #[tauri::command]
 pub fn read_repos(app: AppHandle) -> Result<Vec<Repo>, String> {
-    let total = Instant::now();
     let config = load_config(&app)?;
-    let repos = read_repo_cache(&config)?;
-    let count = repos.len();
-    let ranked = rank(&config, repos);
-    log::info!(
-        "read_repos: {} repos ready in {} ms (total)",
-        count,
-        total.elapsed().as_millis()
-    );
-    Ok(ranked)
+    ranked_repos(&config)
 }
 
 /// Rebuild the cache (blocking, delegates to goto-repo) then return it ranked.
@@ -579,8 +734,7 @@ pub fn read_repos(app: AppHandle) -> Result<Vec<Repo>, String> {
 pub fn refresh_repos(app: AppHandle) -> Result<Vec<Repo>, String> {
     let config = load_config(&app)?;
     run_rebuild(&config, true)?;
-    let repos = read_repo_cache(&config)?;
-    Ok(rank(&config, repos))
+    ranked_repos(&config)
 }
 
 /// Age of repos.tsv in seconds, or None when it can't be determined — an unknown
@@ -635,8 +789,7 @@ pub fn cycle_sort(app: AppHandle) -> Result<Vec<Repo>, String> {
     let config = load_config(&app)?;
     let next = (read_sort_mode(&config) + 1) % 4;
     write_sort_mode(&config, next)?;
-    let repos = read_repo_cache(&config)?;
-    Ok(rank(&config, repos))
+    ranked_repos(&config)
 }
 
 /// Set the shared sort mode to a specific value (0 alpha / 1 recent / 2 most-used)
@@ -646,8 +799,7 @@ pub fn cycle_sort(app: AppHandle) -> Result<Vec<Repo>, String> {
 pub fn set_sort(app: AppHandle, mode: u8) -> Result<Vec<Repo>, String> {
     let config = load_config(&app)?;
     write_sort_mode(&config, mode.min(3))?;
-    let repos = read_repo_cache(&config)?;
-    Ok(rank(&config, repos))
+    ranked_repos(&config)
 }
 
 // ── Data diagnostics ─────────────────────────────────────────────────────────
@@ -682,6 +834,10 @@ pub struct DataInfo {
     pub unique_paths: usize,
     pub history_entries: u64,
     pub top_used: Vec<TopUsed>,
+    /// True when the cache had to be read through `wsl.exe` because the direct
+    /// (UNC) path was unreadable. Everything still works, but each read costs a
+    /// subprocess — worth showing rather than leaving the app silently degraded.
+    pub uses_wsl_fallback: bool,
 }
 
 fn path_stat(path: &Path) -> PathStat {
@@ -733,9 +889,22 @@ pub fn data_info(app: AppHandle) -> Result<DataInfo, String> {
         None => (None, None),
     };
     let posix_join = |dir: &Option<String>, name: &str| dir.as_ref().map(|dir| format!("{}/{}", dir, name));
-    let repos = read_repo_cache(&config).unwrap_or_default();
-    let stats = read_history_stats(&config);
-    let sort_mode = read_sort_mode(&config);
+    let bundle = read_cache_bundle(&config);
+    let repos = bundle
+        .repos_tsv
+        .as_deref()
+        .map(|content| parse_cache(content, &distro))
+        .unwrap_or_default();
+    let stats = bundle
+        .history
+        .as_deref()
+        .map(parse_history_stats)
+        .unwrap_or_default();
+    let sort_mode = bundle
+        .sort
+        .as_deref()
+        .map(parse_sort_mode)
+        .unwrap_or(DEFAULT_SORT_MODE);
     let labels = ["alpha", "recent", "most-used", "type"];
 
     let mut top: Vec<TopUsed> = stats
@@ -775,6 +944,7 @@ pub fn data_info(app: AppHandle) -> Result<DataInfo, String> {
         unique_paths: stats.len(),
         history_entries: stats.values().map(|(uses, _)| *uses).sum(),
         top_used: top,
+        uses_wsl_fallback: bundle.used_fallback,
     })
 }
 
@@ -874,7 +1044,13 @@ mod tests {
         append_history(&config, "/home/me/a").unwrap();
         append_history(&config, "/home/me/a").unwrap();
         append_history(&config, "/home/me/b").unwrap();
-        let stats = read_history_stats(&config);
+        let bundle = read_cache_bundle(&config);
+        assert_eq!(bundle.sort.as_deref().map(parse_sort_mode), Some(1));
+        let stats = bundle
+            .history
+            .as_deref()
+            .map(parse_history_stats)
+            .expect("history must be readable through the bundle");
         assert_eq!(stats.get("/home/me/a").map(|(uses, _)| *uses), Some(2));
         assert_eq!(stats.get("/home/me/b").map(|(uses, _)| *uses), Some(1));
         assert!(
@@ -883,6 +1059,67 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    fn wanted() -> Vec<(String, String)> {
+        vec![
+            ("repos.tsv".into(), "/home/me/.cache/goto-repo/repos.tsv".into()),
+            ("sort".into(), "/home/me/.cache/goto-repo/sort".into()),
+            ("history".into(), "/home/me/.config/goto-repo/history".into()),
+        ]
+    }
+
+    #[test]
+    fn parse_batch_output_splits_each_file_at_its_marker() {
+        let text = concat!(
+            "@@repo-launcher:/home/me/.cache/goto-repo/repos.tsv@@\n",
+            "2 repos\nrepo\t/home/me/a\nrepo\t/home/me/b\n",
+            "@@repo-launcher:/home/me/.cache/goto-repo/sort@@\n",
+            "3\n",
+            "@@repo-launcher:/home/me/.config/goto-repo/history@@\n",
+            "111\t/home/me/a\n",
+        );
+        let found = parse_batch_output(text, &wanted());
+        assert_eq!(found.len(), 3);
+        assert_eq!(parse_sort_mode(&found["sort"]), 3);
+        assert_eq!(parse_cache(&found["repos.tsv"], "Ubuntu").len(), 2);
+        assert_eq!(
+            parse_history_stats(&found["history"]).get("/home/me/a").map(|(uses, _)| *uses),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn parse_batch_output_omits_a_file_that_produced_no_content() {
+        // An unreadable file emits its marker and nothing else; it must be absent
+        // rather than present-and-empty, so the caller can tell them apart.
+        let text = concat!(
+            "@@repo-launcher:/home/me/.cache/goto-repo/repos.tsv@@\n",
+            "1 repos\nrepo\t/home/me/a\n",
+            "@@repo-launcher:/home/me/.cache/goto-repo/sort@@\n",
+            "@@repo-launcher:/home/me/.config/goto-repo/history@@\n",
+            "111\t/home/me/a\n",
+        );
+        let found = parse_batch_output(text, &wanted());
+        assert!(!found.contains_key("sort"), "empty file must not be reported as read");
+        assert!(found.contains_key("repos.tsv") && found.contains_key("history"));
+    }
+
+    #[test]
+    fn parse_batch_output_keeps_content_that_looks_like_a_marker_prefix() {
+        // A repo path can legitimately start with '@@' — only an exact
+        // marker-wrapped line may split a section.
+        let text = concat!(
+            "@@repo-launcher:/home/me/.cache/goto-repo/repos.tsv@@\n",
+            "1 repos\nrepo\t/home/me/@@repo-launcher:not-a-marker\n",
+            "@@repo-launcher:/home/me/.cache/goto-repo/sort@@\n",
+            "1\n",
+        );
+        let found = parse_batch_output(text, &wanted());
+        let repos = parse_cache(&found["repos.tsv"], "Ubuntu");
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].path, "/home/me/@@repo-launcher:not-a-marker");
+        assert_eq!(parse_sort_mode(&found["sort"]), 1);
     }
 
     #[test]
