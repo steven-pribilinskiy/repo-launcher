@@ -39,6 +39,169 @@ mod tests {
         // REPO_LAUNCHER_BUILT_UNIX and silently falling back to 0.
         assert!(info.built_unix > 1_700_000_000);
     }
+
+    #[test]
+    fn is_newer_compares_numerically_not_lexically() {
+        assert!(is_newer("v0.9.13", "0.9.12"));
+        assert!(is_newer("0.9.2", "0.9.13") == false, "13 > 2 numerically");
+        assert!(is_newer("v0.10.0", "0.9.99"));
+        assert!(is_newer("1.0.0", "0.9.13"));
+    }
+
+    #[test]
+    fn is_newer_is_false_for_same_or_older() {
+        assert!(!is_newer("v0.9.12", "0.9.12"));
+        assert!(!is_newer("0.9.11", "0.9.12"));
+        // A shorter tag is padded with zeros, not treated as greater.
+        assert!(!is_newer("v0.9", "0.9.12"));
+    }
+}
+
+const REPO_SLUG: &str = "steven-pribilinskiy/repo-launcher";
+
+pub fn release_page_url() -> String {
+    format!("https://github.com/{REPO_SLUG}/releases/latest")
+}
+
+/// What GitHub says the newest published release is. `latest` is None when the
+/// check couldn't complete OR when nothing has been released yet — neither of
+/// which means "up to date", so `error` carries the reason and the UI can say
+/// which of the three it is instead of implying the app is current.
+#[derive(Serialize)]
+pub struct UpdateCheck {
+    pub current: String,
+    pub latest: Option<String>,
+    pub available: bool,
+    pub release_url: String,
+    pub error: Option<String>,
+}
+
+/// Compares the numeric components only (`0.9.13` > `0.9.2` > `0.9`). A
+/// pre-release suffix isn't ordered — it compares equal to its release, which is
+/// enough to decide whether to point at something newer.
+fn is_newer(latest: &str, current: &str) -> bool {
+    let parse = |raw: &str| -> Vec<u64> {
+        raw.trim()
+            .trim_start_matches('v')
+            .split(['.', '-', '+'])
+            .map(|part| part.parse::<u64>().unwrap_or(0))
+            .collect()
+    };
+    let (latest, current) = (parse(latest), parse(current));
+    for index in 0..latest.len().max(current.len()) {
+        let left = latest.get(index).copied().unwrap_or(0);
+        let right = current.get(index).copied().unwrap_or(0);
+        if left != right {
+            return left > right;
+        }
+    }
+    false
+}
+
+/// `Ok(None)` = the repo has no published release yet (GitHub answers 404), which
+/// is a normal state, not a failure.
+fn fetch_latest_tag() -> Result<Option<String>, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .user_agent(concat!("repo-launcher/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|err| err.to_string())?;
+    let response = client
+        .get(format!(
+            "https://api.github.com/repos/{REPO_SLUG}/releases/latest"
+        ))
+        .send()
+        .map_err(|err| err.to_string())?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        return Err(format!("GitHub returned {}", response.status()));
+    }
+    let body = response.text().map_err(|err| err.to_string())?;
+    let parsed: serde_json::Value = serde_json::from_str(&body).map_err(|err| err.to_string())?;
+    Ok(parsed
+        .get("tag_name")
+        .and_then(|value| value.as_str())
+        .map(|tag| tag.to_string()))
+}
+
+fn run_update_check() -> UpdateCheck {
+    let base = UpdateCheck {
+        current: VERSION.to_string(),
+        latest: None,
+        available: false,
+        release_url: release_page_url(),
+        error: None,
+    };
+    match fetch_latest_tag() {
+        Ok(Some(tag)) => {
+            let available = is_newer(&tag, VERSION);
+            UpdateCheck {
+                latest: Some(tag.trim_start_matches('v').to_string()),
+                available,
+                ..base
+            }
+        }
+        Ok(None) => UpdateCheck {
+            error: Some("No release has been published yet".into()),
+            ..base
+        },
+        Err(err) => UpdateCheck {
+            error: Some(err),
+            ..base
+        },
+    }
+}
+
+/// Ask GitHub whether a newer release exists. Async + `spawn_blocking` so the
+/// network round trip never runs on the UI thread.
+#[tauri::command]
+pub async fn check_for_update() -> UpdateCheck {
+    tauri::async_runtime::spawn_blocking(run_update_check)
+        .await
+        .unwrap_or_else(|err| UpdateCheck {
+            current: VERSION.to_string(),
+            latest: None,
+            available: false,
+            release_url: release_page_url(),
+            error: Some(err.to_string()),
+        })
+}
+
+/// One check shortly after launch, so a new version announces itself instead of
+/// waiting to be looked for. Silent unless something newer is actually published.
+pub fn spawn_update_check(app: AppHandle) {
+    if cfg!(debug_assertions) {
+        return;
+    }
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(20));
+        let result = run_update_check();
+        if let Some(err) = &result.error {
+            log::info!("update check: {}", err);
+            return;
+        }
+        let Some(latest) = &result.latest else { return };
+        log::info!("update check: latest {} (running {})", latest, VERSION);
+        if !result.available {
+            return;
+        }
+        let notify = load_config(&app)
+            .map(|config| config.notify_on_update)
+            .unwrap_or(true);
+        if !notify {
+            return;
+        }
+        let _ = app
+            .notification()
+            .builder()
+            .title("Repo Launcher update available")
+            .body(format!(
+                "v{latest} is out — you're on v{VERSION}. Settings → Updates to download."
+            ))
+            .show();
+    });
 }
 
 #[derive(Default, Serialize, Deserialize)]

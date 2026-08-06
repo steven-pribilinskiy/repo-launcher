@@ -66,6 +66,17 @@ export type BuildInfo = {
   built_unix: number;
 };
 
+export type UpdateCheck = {
+  current: string;
+  /** Newest published release, or null when the check failed or nothing is
+   * released yet — neither of which means "up to date"; see `error`. */
+  latest: string | null;
+  available: boolean;
+  release_url: string;
+  /** Why the check couldn't answer, when it couldn't. */
+  error: string | null;
+};
+
 export type PathStat = {
   path: string;
   exists: boolean;

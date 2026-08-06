@@ -31,6 +31,7 @@ import {
   type DataInfo,
   type PathStat,
   type TerminalKind,
+  type UpdateCheck,
 } from "@/types";
 
 const inputCls =
@@ -477,17 +478,72 @@ function UpdatesTab({
   config: AppConfig;
   patch: (changes: Partial<AppConfig>) => void;
 }) {
+  const [check, setCheck] = useState<UpdateCheck | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const runCheck = () => {
+    setChecking(true);
+    api
+      .checkForUpdate()
+      .then(setCheck)
+      .catch((error) =>
+        setCheck({
+          current: "",
+          latest: null,
+          available: false,
+          release_url: "",
+          error: String(error),
+        }),
+      )
+      .finally(() => setChecking(false));
+  };
+
+  // Check on open, so the tab answers "am I current?" without being asked.
+  useEffect(runCheck, []);
+
   return (
     <div className="flex max-w-3xl flex-col gap-3">
-      <Toggle
-        checked={config.auto_restart_on_update}
-        onChange={(value) => patch({ auto_restart_on_update: value })}
-        label="Auto-restart when a new version is detected"
-      />
+      <div className="rounded-md border border-zinc-200 p-3 dark:border-zinc-700">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={runCheck}
+            disabled={checking}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            {checking ? "Checking…" : "Check for updates"}
+          </button>
+          {check?.available && check.latest && (
+            <button
+              type="button"
+              onClick={() => void api.openUrl(check.release_url)}
+              className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
+            >
+              Download v{check.latest}
+            </button>
+          )}
+        </div>
+        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+          {checking
+            ? "Asking GitHub for the newest release…"
+            : !check
+              ? "Not checked yet."
+              : check.error
+                ? `Couldn’t check: ${check.error}. The version you’re running may not be the newest.`
+                : check.available
+                  ? `v${check.latest} is available — you’re on v${check.current}. Downloading opens the release page; run the installer to update.`
+                  : `You’re on v${check.current}, the newest release.`}
+        </p>
+      </div>
       <Toggle
         checked={config.notify_on_update}
         onChange={(value) => patch({ notify_on_update: value })}
-        label="Show a system notification after an update"
+        label="Notify me when a new version is published, and after updating"
+      />
+      <Toggle
+        checked={config.auto_restart_on_update}
+        onChange={(value) => patch({ auto_restart_on_update: value })}
+        label="Restart automatically when the app file is replaced (Linux/macOS only — on Windows the installer does the restart)"
       />
       <div className="pt-2">
         <button

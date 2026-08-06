@@ -76,6 +76,7 @@ fn main() {
             // Notify if we were just updated, then watch for the next update.
             commands::update::check_and_notify_update(&app.handle());
             commands::update::spawn_restart_watcher(app.handle().clone());
+            commands::update::spawn_update_check(app.handle().clone());
 
             // --- System tray ---
             let show_item = MenuItemBuilder::with_id("show", "Show").build(app)?;
@@ -234,7 +235,9 @@ fn main() {
             data_info,
             run_action,
             commands::repos::open_path,
+            commands::repos::open_url,
             commands::repos::create_desktop_shortcut,
+            commands::update::check_for_update,
             list_distros,
             open_settings,
             update_hotkey,

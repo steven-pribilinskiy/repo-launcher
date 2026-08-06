@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ActionDef, AppConfig, BuildInfo, DataInfo, Repo } from "@/types";
+import type { ActionDef, AppConfig, BuildInfo, DataInfo, Repo, UpdateCheck } from "@/types";
 
 export const api = {
   /** Read the goto-repo cache, ranked by the shared sort mode. */
@@ -39,6 +39,12 @@ export const api = {
   defaultConfig: () => invoke<AppConfig>("default_config"),
 
   appBuildInfo: () => invoke<BuildInfo>("app_build_info"),
+
+  /** Ask GitHub whether a newer release exists. */
+  checkForUpdate: () => invoke<UpdateCheck>("check_for_update"),
+
+  /** Open an http(s) URL in the default browser. */
+  openUrl: (url: string) => invoke<void>("open_url", { url }),
 
   dataInfo: () => invoke<DataInfo>("data_info"),
 

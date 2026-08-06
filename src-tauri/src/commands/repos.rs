@@ -323,6 +323,49 @@ fn resolve_win(app: &AppHandle, path: &str) -> String {
     }
 }
 
+/// Open a URL in the default browser. Separate from `open_path` because that one
+/// runs its argument through WSL→Windows path resolution, which mangles a URL.
+#[tauri::command]
+pub fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err(format!("Refusing to open a non-http(s) target: {}", url));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::ffi::OsStr;
+        use std::os::windows::ffi::OsStrExt;
+        let wide = |value: &str| {
+            OsStr::new(value).encode_wide().chain(std::iter::once(0)).collect::<Vec<u16>>()
+        };
+        let verb = wide("open");
+        let target = wide(&url);
+        let result = unsafe {
+            windows_sys::Win32::UI::Shell::ShellExecuteW(
+                std::ptr::null_mut(),
+                verb.as_ptr(),
+                target.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL,
+            )
+        };
+        // ShellExecuteW returns a value > 32 on success.
+        if (result as isize) <= 32 {
+            return Err(format!("Failed to open {} (ShellExecute {})", url, result as isize));
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        Command::new(opener)
+            .arg(&url)
+            .spawn()
+            .map_err(|err| format!("Failed to open {}: {}", url, err))?;
+        Ok(())
+    }
+}
+
 /// Open a Data-tab path. `mode`: "file" = launch with the default app, "reveal" =
 /// open the folder with the file selected, "folder" = open the folder itself.
 #[tauri::command]
