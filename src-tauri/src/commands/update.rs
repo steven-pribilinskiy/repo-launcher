@@ -98,8 +98,14 @@ fn is_newer(latest: &str, current: &str) -> bool {
     false
 }
 
-/// `Ok(None)` = the repo has no published release yet (GitHub answers 404), which
-/// is a normal state, not a failure.
+/// `Ok(None)` = the repo is readable but has no published release yet — a normal
+/// state, not a failure.
+///
+/// A bare 404 cannot tell that apart from "this repo isn't visible to an
+/// unauthenticated client", because GitHub answers 404 for a private repo rather
+/// than 403. Reporting the wrong one would render a permanently broken check as
+/// the reassuring "nothing released yet", so the two are separated by asking
+/// whether the repo itself is readable.
 fn fetch_latest_tag() -> Result<Option<String>, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -113,7 +119,18 @@ fn fetch_latest_tag() -> Result<Option<String>, String> {
         .send()
         .map_err(|err| err.to_string())?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(None);
+        let repo_visible = client
+            .get(format!("https://api.github.com/repos/{REPO_SLUG}"))
+            .send()
+            .map(|probe| probe.status().is_success())
+            .map_err(|err| err.to_string())?;
+        return if repo_visible {
+            Ok(None)
+        } else {
+            Err(format!(
+                "{REPO_SLUG} isn't readable without signing in, so releases can't be seen from here"
+            ))
+        };
     }
     if !response.status().is_success() {
         return Err(format!("GitHub returned {}", response.status()));
