@@ -150,14 +150,6 @@ fn repos_tsv(config: &AppConfig) -> Result<PathBuf, String> {
     Ok(goto_dirs(config)?.0.join("repos.tsv"))
 }
 
-fn sort_file(config: &AppConfig) -> Result<PathBuf, String> {
-    Ok(goto_dirs(config)?.0.join("sort"))
-}
-
-fn history_file(config: &AppConfig) -> Result<PathBuf, String> {
-    Ok(goto_dirs(config)?.1.join("history"))
-}
-
 /// Which goto-repo directory a file lives in.
 #[derive(Clone, Copy)]
 enum CacheDir {
@@ -215,6 +207,68 @@ fn wsl_cat(distro: &str, posix_path: &str) -> Result<String, String> {
     Ok(super::repos::decode_wsl_output(&output.stdout))
 }
 
+/// Write to a WSL file via `wsl.exe -d <distro> -- tee [-a] <posix>`, feeding the
+/// content on stdin. The write-direction counterpart to `wsl_cat`: the stale 9P
+/// directory cache that hides a file from a UNC read fails a UNC write too. `tee`
+/// takes the path as a plain argv element, so no shell quoting is involved.
+#[cfg(target_os = "windows")]
+fn wsl_write(distro: &str, posix_path: &str, content: &str, append: bool) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::windows::process::CommandExt;
+    use std::process::Stdio;
+
+    let mut args = vec!["-d", distro, "--", "tee"];
+    if append {
+        args.push("-a");
+    }
+    args.push(posix_path);
+    let mut child = Command::new("wsl")
+        .args(&args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .spawn()
+        .map_err(|err| format!("wsl tee {} failed: {}", posix_path, err))?;
+    // Dropping the handle at the end of this statement closes the pipe, so `tee`
+    // sees EOF and exits instead of blocking the wait below.
+    child
+        .stdin
+        .take()
+        .ok_or("wsl tee: stdin unavailable")?
+        .write_all(content.as_bytes())
+        .map_err(|err| format!("wsl tee {} write failed: {}", posix_path, err))?;
+    let status = child
+        .wait()
+        .map_err(|err| format!("wsl tee {} wait failed: {}", posix_path, err))?;
+    if !status.success() {
+        return Err(format!(
+            "wsl tee {} exited {}",
+            posix_path,
+            status.code().unwrap_or(-1)
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn wsl_mkdir_p(distro: &str, posix_dir: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    let output = Command::new("wsl")
+        .args(["-d", distro, "--", "mkdir", "-p", posix_dir])
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .output()
+        .map_err(|err| format!("wsl mkdir {} failed: {}", posix_dir, err))?;
+    if !output.status.success() {
+        return Err(format!(
+            "wsl mkdir {} exited {}",
+            posix_dir,
+            output.status.code().unwrap_or(-1)
+        ));
+    }
+    Ok(())
+}
+
 /// `stat` a WSL file via `wsl.exe` — returns (size_bytes, mtime_unix). Lets the
 /// Data tab report a present file honestly when the UNC metadata read is blinded
 /// by a stale 9P cache.
@@ -266,6 +320,64 @@ fn read_cache_string(config: &AppConfig, which: CacheDir, file_name: &str) -> Re
         }
     }
     direct.map_err(|err| format!("Cannot read {}: {}", path.display(), err))
+}
+
+fn write_direct(path: &Path, content: &str, append: bool) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if !append {
+        return std::fs::write(path, content);
+    }
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+    file.write_all(content.as_bytes())
+}
+
+/// Write a goto-repo file, mirroring `read_cache_string` in the other direction:
+/// direct write first (UNC on Windows, native elsewhere); on Windows, if that
+/// fails, fall back to `wsl.exe tee` so a stale 9P cache can't silently drop a
+/// write to the shared sort mode or history.
+fn write_cache_string(
+    config: &AppConfig,
+    which: CacheDir,
+    file_name: &str,
+    content: &str,
+    append: bool,
+) -> Result<(), String> {
+    let (cache_dir, config_dir) = goto_dirs(config)?;
+    let dir = match which {
+        CacheDir::Cache => cache_dir,
+        CacheDir::Config => config_dir,
+    };
+    let path = dir.join(file_name);
+    let direct = write_direct(&path, content, append);
+    #[cfg(target_os = "windows")]
+    if let Err(direct_err) = &direct {
+        if let Some((cache_posix, config_posix)) = wsl_posix_dirs(config) {
+            let posix_dir = match which {
+                CacheDir::Cache => cache_posix,
+                CacheDir::Config => config_posix,
+            };
+            let posix_path = format!("{}/{}", posix_dir, file_name);
+            let distro = resolve_distro(config);
+            // Retry once behind `mkdir -p`, for the first write into a goto-repo
+            // dir that does not exist yet.
+            let written = wsl_write(&distro, &posix_path, content, append).or_else(|_| {
+                wsl_mkdir_p(&distro, &posix_dir)
+                    .and_then(|_| wsl_write(&distro, &posix_path, content, append))
+            });
+            if written.is_ok() {
+                log::info!(
+                    "write_cache_string: direct write of {} failed ({}); used wsl.exe tee",
+                    path.display(),
+                    direct_err
+                );
+                return Ok(());
+            }
+        }
+    }
+    direct.map_err(|err| format!("Cannot write {}: {}", path.display(), err))
 }
 
 /// Parse repos.tsv (skip the header line; lines are `<type>\t<path>`).
@@ -345,11 +457,7 @@ pub fn read_sort_mode(config: &AppConfig) -> u8 {
 }
 
 fn write_sort_mode(config: &AppConfig, mode: u8) -> Result<(), String> {
-    let path = sort_file(config)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-    }
-    std::fs::write(path, mode.to_string()).map_err(|err| err.to_string())
+    write_cache_string(config, CacheDir::Cache, "sort", &mode.to_string(), false)
 }
 
 /// Pure ranking core, mirroring rank-repos.sh: 0 = alpha (by path), 1 = recent
@@ -440,22 +548,12 @@ fn run_rebuild(config: &AppConfig, blocking: bool) -> Result<(), String> {
 /// Append a usage record to the shared goto-repo history (feeds frecency ranking
 /// for both this app and the `fr`/`g` shell tool).
 pub fn append_history(config: &AppConfig, repo_path: &str) -> Result<(), String> {
-    let path = history_file(config)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-    }
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|dur| dur.as_secs())
         .unwrap_or(0);
     let line = format!("{}\t{}\n", ts, repo_path);
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|err| err.to_string())?;
-    file.write_all(line.as_bytes()).map_err(|err| err.to_string())
+    write_cache_string(config, CacheDir::Config, "history", &line, true)
 }
 
 // ── Tauri commands ──────────────────────────────────────────────────────────
@@ -485,16 +583,36 @@ pub fn refresh_repos(app: AppHandle) -> Result<Vec<Repo>, String> {
     Ok(rank(&config, repos))
 }
 
+/// Age of repos.tsv in seconds, or None when it can't be determined — an unknown
+/// age counts as stale. Falls back to `wsl.exe stat` on Windows for the same reason
+/// reads do: a stale 9P cache fails the UNC metadata read, and every popup open
+/// would then rebuild the whole projects tree.
+fn repos_tsv_age_secs(config: &AppConfig) -> Option<u64> {
+    let path = repos_tsv(config).ok()?;
+    let direct = std::fs::metadata(&path)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .map(|age| age.as_secs());
+    #[cfg(target_os = "windows")]
+    if direct.is_none() {
+        if let Some((cache_posix, _)) = wsl_posix_dirs(config) {
+            let posix_path = format!("{}/repos.tsv", cache_posix);
+            if let Some((_, mtime)) = wsl_stat(&resolve_distro(config), &posix_path) {
+                let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+                return Some(now.saturating_sub(mtime));
+            }
+        }
+    }
+    direct
+}
+
 /// Kick a non-blocking background rebuild if the cache is older than the TTL.
 #[tauri::command]
 pub fn maybe_refresh(app: AppHandle) -> Result<(), String> {
     let config = load_config(&app)?;
-    let tsv = repos_tsv(&config)?;
-    let stale = std::fs::metadata(&tsv)
-        .and_then(|meta| meta.modified())
-        .ok()
-        .and_then(|modified| modified.elapsed().ok())
-        .map(|age| age.as_secs() > config.cache_ttl_seconds)
+    let stale = repos_tsv_age_secs(&config)
+        .map(|age| age > config.cache_ttl_seconds)
         .unwrap_or(true);
     if stale {
         run_rebuild(&config, false)?;
@@ -731,6 +849,40 @@ mod tests {
             ranked.iter().map(|item| item.path.as_str()).collect::<Vec<_>>(),
             vec!["/b", "/a", "/c", "/z"] // dir, repo (a,c), wt — kind asc, path tiebreak
         );
+    }
+
+    /// The write side of the cache, end to end: a sort mode survives a round trip,
+    /// a second write replaces rather than appends, and history appends into the
+    /// sibling `.config` dir. Covers the direct path only — the `wsl.exe` fallback
+    /// is Windows-only and needs a real distro.
+    #[test]
+    fn write_cache_string_round_trips_sort_and_history() {
+        let root =
+            std::env::temp_dir().join(format!("repo-launcher-write-test-{}", std::process::id()));
+        let cache_dir = root.join(".cache").join("goto-repo");
+        let config = AppConfig {
+            cache_path: Some(cache_dir.to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+
+        // Nothing exists yet — the write has to create the directory.
+        write_cache_string(&config, CacheDir::Cache, "sort", "3", false).unwrap();
+        assert_eq!(read_sort_mode(&config), 3);
+        write_cache_string(&config, CacheDir::Cache, "sort", "1", false).unwrap();
+        assert_eq!(read_sort_mode(&config), 1, "second write must replace, not append");
+
+        append_history(&config, "/home/me/a").unwrap();
+        append_history(&config, "/home/me/a").unwrap();
+        append_history(&config, "/home/me/b").unwrap();
+        let stats = read_history_stats(&config);
+        assert_eq!(stats.get("/home/me/a").map(|(uses, _)| *uses), Some(2));
+        assert_eq!(stats.get("/home/me/b").map(|(uses, _)| *uses), Some(1));
+        assert!(
+            root.join(".config").join("goto-repo").join("history").exists(),
+            "history belongs in the sibling .config dir"
+        );
+
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

@@ -43,6 +43,10 @@ type RepoStore = {
   error: string | null;
   config: AppConfig | null;
   sortMode: number;
+  /** Why the last sort change failed, surfaced next to the sort control. A sort
+   * writes the shared `sort` file, which can fail on its own (the repo list is
+   * readable and unchanged), so it needs its own channel rather than `error`. */
+  sortError: string | null;
   multiDistro: boolean;
   lastLoadAt: number;
   /** True once a read has succeeded, so an empty list can be told apart from a
@@ -63,6 +67,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   error: null,
   config: null,
   sortMode: 2,
+  sortError: null,
   multiDistro: false,
   lastLoadAt: 0,
   hasLoaded: false,
@@ -132,18 +137,18 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   cycleSort: async () => {
     try {
       const repos = await api.cycleSort();
-      set({ repos, sortMode: (get().sortMode + 1) % 4 });
+      set({ repos, sortMode: (get().sortMode + 1) % 4, sortError: null });
     } catch (error) {
-      console.error("Failed to cycle sort:", error);
+      set({ sortError: String(error) });
     }
   },
 
   setSort: async (mode: number) => {
     try {
       const repos = await api.setSort(mode);
-      set({ repos, sortMode: mode % 4 });
+      set({ repos, sortMode: mode % 4, sortError: null });
     } catch (error) {
-      console.error("Failed to set sort:", error);
+      set({ sortError: String(error) });
     }
   },
 }));

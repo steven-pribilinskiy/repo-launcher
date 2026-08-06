@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  AlertTriangle,
   CornerDownLeft,
   GripHorizontal,
   List as ListIcon,
@@ -30,6 +31,9 @@ type ActionBarProps = {
   onOpenPalette: () => void;
   repoCount: number;
   sortMode: number;
+  /** Set when the last sort change couldn't be saved — the order on screen is then
+   * not what the control claims, so the control has to say so. */
+  sortError: string | null;
   view: "list" | "table";
   onToggleView: () => void;
   /** False when the list is empty — repo-scoped actions are hidden, since there's
@@ -56,6 +60,7 @@ export function ActionBar({
   onOpenPalette,
   repoCount,
   sortMode,
+  sortError,
   view,
   onToggleView,
   hasSelection,
@@ -120,11 +125,12 @@ export function ActionBar({
         <button
           type="button"
           onClick={onCycleSort}
-          title="Cycle sort order"
+          title={sortError ? `Couldn’t save the sort order: ${sortError}` : "Cycle sort order"}
           className="flex items-center gap-1.5 rounded px-1 py-0.5 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60"
         >
           <Kbd>Ctrl+S</Kbd>
           <span className="whitespace-nowrap text-[11px] text-zinc-500 dark:text-zinc-400">Sort: {SORT_LABELS[sortMode]}</span>
+          {sortError && <AlertTriangle className="h-3 w-3 shrink-0 text-amber-500" />}
         </button>
         <button
           type="button"

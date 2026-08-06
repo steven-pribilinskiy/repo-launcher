@@ -59,6 +59,7 @@ export default function Popup() {
     lastLoadAt,
     multiDistro,
     sortMode,
+    sortError,
     config,
     loadConfig,
     loadRepos,
@@ -247,6 +248,7 @@ export default function Popup() {
         onOpenPalette={() => setPaletteOpen(true)}
         repoCount={displayResults.length}
         sortMode={sortMode}
+        sortError={sortError}
         view={view}
         onToggleView={toggleView}
         hasSelection={hasSelection}
