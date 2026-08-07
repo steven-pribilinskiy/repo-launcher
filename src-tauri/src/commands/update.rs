@@ -186,38 +186,51 @@ pub async fn check_for_update() -> UpdateCheck {
         })
 }
 
-/// One check shortly after launch, so a new version announces itself instead of
-/// waiting to be looked for. Silent unless something newer is actually published.
+/// Delay before the first check, so it stays off the startup path.
+const UPDATE_CHECK_DELAY: Duration = Duration::from_secs(20);
+/// Gap between checks. This app is a tray launcher that runs for days, so a
+/// startup-only check would never see a release published after launch — which is
+/// every release, from a running instance's point of view.
+const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(60 * 60);
+
+/// Poll for a newer release for as long as the app runs, notifying once per
+/// version. Silent unless something newer is actually published.
 pub fn spawn_update_check(app: AppHandle) {
     if cfg!(debug_assertions) {
         return;
     }
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(20));
-        let result = run_update_check();
-        if let Some(err) = &result.error {
-            log::info!("update check: {}", err);
-            return;
+        let mut announced: Option<String> = None;
+        std::thread::sleep(UPDATE_CHECK_DELAY);
+        loop {
+            let result = run_update_check();
+            match (&result.error, &result.latest) {
+                // A failed check is transient (offline, rate limited) — log it and
+                // try again next time rather than ending the loop.
+                (Some(err), _) => log::info!("update check: {}", err),
+                (None, Some(latest)) => {
+                    log::info!("update check: latest {} (running {})", latest, VERSION);
+                    let notify = load_config(&app)
+                        .map(|config| config.notify_on_update)
+                        .unwrap_or(true);
+                    // Announce a given version once per run: re-notifying every
+                    // interval for a version already reported is nagging, not news.
+                    if result.available && notify && announced.as_deref() != Some(latest.as_str()) {
+                        announced = Some(latest.clone());
+                        let _ = app
+                            .notification()
+                            .builder()
+                            .title("Repo Launcher update available")
+                            .body(format!(
+                                "v{latest} is out — you're on v{VERSION}. Settings → Updates to download."
+                            ))
+                            .show();
+                    }
+                }
+                (None, None) => {}
+            }
+            std::thread::sleep(UPDATE_CHECK_INTERVAL);
         }
-        let Some(latest) = &result.latest else { return };
-        log::info!("update check: latest {} (running {})", latest, VERSION);
-        if !result.available {
-            return;
-        }
-        let notify = load_config(&app)
-            .map(|config| config.notify_on_update)
-            .unwrap_or(true);
-        if !notify {
-            return;
-        }
-        let _ = app
-            .notification()
-            .builder()
-            .title("Repo Launcher update available")
-            .body(format!(
-                "v{latest} is out — you're on v{VERSION}. Settings → Updates to download."
-            ))
-            .show();
     });
 }
 
