@@ -247,7 +247,7 @@ export default function Settings() {
       </header>
 
       <div className="flex-1 overflow-y-auto px-6 py-5">
-        {tab === "general" && <GeneralTab config={config} distros={distros} patch={patch} />}
+        {tab === "general" && <GeneralTab config={config} patch={patch} />}
         {tab === "updates" && <UpdatesTab config={config} patch={patch} />}
         {tab === "actions" && (
           <ActionsTab
@@ -258,7 +258,7 @@ export default function Settings() {
             setEditingId={setEditingActionId}
           />
         )}
-        {tab === "data" && <DataTab />}
+        {tab === "data" && <DataTab config={config} distros={distros} patch={patch} />}
       </div>
 
       <footer className="flex items-center justify-end border-t border-zinc-200 px-5 py-2 text-[11px] text-zinc-400 dark:border-zinc-800 dark:text-zinc-500">
@@ -292,7 +292,116 @@ function cleanConfig(config: AppConfig): AppConfig {
 
 // ── General tab ───────────────────────────────────────────────────────────────
 
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h3 className="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+        {title}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
 function GeneralTab({
+  config,
+  patch,
+}: {
+  config: AppConfig;
+  patch: (changes: Partial<AppConfig>) => void;
+}) {
+  return (
+    <div className="flex max-w-3xl flex-col gap-6">
+      <Section title="Appearance">
+        <div className="grid grid-cols-2 gap-4">
+          <label className="flex flex-col gap-1">
+            <span className={labelCls}>Theme</span>
+            <select
+              className={inputCls}
+              value={config.theme}
+              onChange={(event) => {
+                patch({ theme: event.target.value });
+                applyTheme(event.target.value);
+              }}
+            >
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className={labelCls}>Window transparency</span>
+            <div className="flex h-[34px] items-center gap-2">
+              <input
+                type="range"
+                min={0}
+                max={60}
+                step={5}
+                value={config.transparency}
+                onChange={(event) => patch({ transparency: Number(event.target.value) })}
+                className="w-full accent-indigo-600"
+              />
+              <span className="w-16 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">
+                {config.transparency === 0 ? "Opaque" : `${config.transparency}%`}
+              </span>
+            </div>
+          </label>
+        </div>
+      </Section>
+
+      <Section title="Popup window">
+        <div className="grid grid-cols-2 gap-4">
+          <label className="flex flex-col gap-1">
+            <span className={labelCls}>Global hotkey</span>
+            <HotkeyInput value={config.hotkey} onChange={(hotkey) => patch({ hotkey })} />
+          </label>
+        </div>
+        <Toggle
+          checked={config.remember_position}
+          onChange={(value) => patch({ remember_position: value })}
+          label="Remember the popup's position between launches"
+        />
+        <div>
+          <button
+            type="button"
+            onClick={() => api.resetWindowGeometry()}
+            className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            Reset size &amp; position
+          </button>
+        </div>
+      </Section>
+
+      <Section title="Startup &amp; integration">
+        <div className="grid grid-cols-2 gap-4">
+          <label className="flex flex-col gap-1">
+            <span className={labelCls}>Preferred terminal (agent harness)</span>
+            <select
+              className={inputCls}
+              value={config.preferred_terminal}
+              onChange={(event) =>
+                patch({ preferred_terminal: event.target.value as TerminalKind })
+              }
+            >
+              <option value="wt">Windows Terminal</option>
+              <option value="tabby">Tabby</option>
+            </select>
+          </label>
+        </div>
+        <Toggle
+          checked={config.launch_at_startup}
+          onChange={(value) => patch({ launch_at_startup: value })}
+          label="Launch at startup (start automatically when you log in)"
+        />
+        <DesktopShortcutButton />
+      </Section>
+    </div>
+  );
+}
+
+/** Everything that decides WHERE the repo cache comes from and how often it is
+ * re-read. Lives on the Data tab, next to the files these settings resolve to. */
+function CacheSettings({
   config,
   distros,
   patch,
@@ -305,96 +414,58 @@ function GeneralTab({
     () => (config.rebuild_command ?? []).join(" "),
     [config.rebuild_command],
   );
+  // Keep a configured distro selectable even when it isn't in the detected list,
+  // so an unreachable or renamed distro is never silently switched away.
+  const distroOptions = useMemo(() => {
+    const current = config.wsl_distro ?? "";
+    return current && !distros.includes(current) ? [current, ...distros] : distros;
+  }, [config.wsl_distro, distros]);
+
   return (
-    <div className="grid max-w-3xl grid-cols-2 gap-4">
-      <label className="flex flex-col gap-1">
-        <span className={labelCls}>Global hotkey</span>
-        <HotkeyInput value={config.hotkey} onChange={(hotkey) => patch({ hotkey })} />
-      </label>
-      <label className="flex flex-col gap-1">
-        <span className={labelCls}>Theme</span>
-        <select
-          className={inputCls}
-          value={config.theme}
-          onChange={(event) => {
-            patch({ theme: event.target.value });
-            applyTheme(event.target.value);
-          }}
-        >
-          <option value="system">System</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-        </select>
-      </label>
-      <label className="flex flex-col gap-1">
-        <span className={labelCls}>Window transparency</span>
-        <div className="flex h-[34px] items-center gap-2">
+    <Section title="Cache source">
+      <div className="grid grid-cols-2 gap-4">
+        <label className="flex flex-col gap-1">
+          <span className={labelCls}>WSL distro (cache host)</span>
+          <select
+            className={inputCls}
+            value={config.wsl_distro ?? ""}
+            onChange={(event) => patch({ wsl_distro: event.target.value || null })}
+          >
+            <option value="">Auto-detect</option>
+            {distroOptions.map((distro) => (
+              <option key={distro} value={distro}>
+                {distro}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className={labelCls}>Cache TTL (seconds)</span>
           <input
-            type="range"
-            min={0}
-            max={60}
-            step={5}
-            value={config.transparency}
-            onChange={(event) => patch({ transparency: Number(event.target.value) })}
-            className="w-full accent-indigo-600"
+            type="number"
+            className={inputCls}
+            value={config.cache_ttl_seconds}
+            onChange={(event) => patch({ cache_ttl_seconds: Number(event.target.value) || 0 })}
           />
-          <span className="w-16 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">
-            {config.transparency === 0 ? "Opaque" : `${config.transparency}%`}
-          </span>
-        </div>
-      </label>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className={labelCls}>Popup reload cache</span>
+          <select
+            className={inputCls}
+            value={config.reload_throttle_minutes}
+            onChange={(event) => patch({ reload_throttle_minutes: Number(event.target.value) })}
+          >
+            <option value={0.5}>30 sec</option>
+            <option value={1}>1 min</option>
+            <option value={2}>2 min</option>
+            <option value={4}>4 min</option>
+            <option value={6}>6 min</option>
+            <option value={12}>12 min</option>
+            <option value={24}>24 min</option>
+          </select>
+        </label>
+      </div>
       <label className="flex flex-col gap-1">
-        <span className={labelCls}>Preferred terminal (agent harness)</span>
-        <select
-          className={inputCls}
-          value={config.preferred_terminal}
-          onChange={(event) => patch({ preferred_terminal: event.target.value as TerminalKind })}
-        >
-          <option value="wt">Windows Terminal</option>
-          <option value="tabby">Tabby</option>
-        </select>
-      </label>
-      <label className="flex flex-col gap-1">
-        <span className={labelCls}>WSL distro (cache host)</span>
-        <input
-          className={inputCls}
-          list="distros"
-          value={config.wsl_distro ?? ""}
-          onChange={(event) => patch({ wsl_distro: event.target.value || null })}
-          placeholder="auto-detect"
-        />
-        <datalist id="distros">
-          {distros.map((distro) => (
-            <option key={distro} value={distro} />
-          ))}
-        </datalist>
-      </label>
-      <label className="flex flex-col gap-1">
-        <span className={labelCls}>Cache TTL (seconds)</span>
-        <input
-          type="number"
-          className={inputCls}
-          value={config.cache_ttl_seconds}
-          onChange={(event) => patch({ cache_ttl_seconds: Number(event.target.value) || 0 })}
-        />
-      </label>
-      <label className="flex flex-col gap-1">
-        <span className={labelCls}>Popup reload cache</span>
-        <select
-          className={inputCls}
-          value={config.reload_throttle_minutes}
-          onChange={(event) => patch({ reload_throttle_minutes: Number(event.target.value) })}
-        >
-          <option value={0.5}>30 sec</option>
-          <option value={1}>1 min</option>
-          <option value={2}>2 min</option>
-          <option value={4}>4 min</option>
-          <option value={6}>6 min</option>
-          <option value={12}>12 min</option>
-          <option value={24}>24 min</option>
-        </select>
-      </label>
-      <label className="col-span-2 flex flex-col gap-1">
         <span className={labelCls}>Cache path override (goto-repo cache dir)</span>
         <input
           className={inputCls}
@@ -403,7 +474,7 @@ function GeneralTab({
           placeholder="auto (resolved from WSL distro)"
         />
       </label>
-      <label className="col-span-2 flex flex-col gap-1">
+      <label className="flex flex-col gap-1">
         <span className={labelCls}>Rebuild command (space-separated)</span>
         <input
           className={inputCls}
@@ -417,32 +488,10 @@ function GeneralTab({
         <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
           How the launcher regenerates its repo list — it runs goto-repo's scanner over your
           projects and writes the cache the popup reads. Leave blank to auto-detect; the tray's
-          “Refresh Repos” and Data → “Rebuild cache” run this.
+          “Refresh Repos” and “Rebuild cache” above run this.
         </span>
       </label>
-      <Toggle
-        className="col-span-2"
-        checked={config.remember_position}
-        onChange={(value) => patch({ remember_position: value })}
-        label="Remember the popup's position between launches"
-      />
-      <Toggle
-        className="col-span-2"
-        checked={config.launch_at_startup}
-        onChange={(value) => patch({ launch_at_startup: value })}
-        label="Launch at startup (start automatically when you log in)"
-      />
-      <div className="col-span-2 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => api.resetWindowGeometry()}
-          className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
-          Reset size &amp; position
-        </button>
-        <DesktopShortcutButton />
-      </div>
-    </div>
+    </Section>
   );
 }
 
@@ -642,7 +691,15 @@ function FileCard({ title, stat, extra }: { title: string; stat: PathStat; extra
   );
 }
 
-function DataTab() {
+function DataTab({
+  config,
+  distros,
+  patch,
+}: {
+  config: AppConfig;
+  distros: string[];
+  patch: (changes: Partial<AppConfig>) => void;
+}) {
   const [data, setData] = useState<DataInfo | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -696,6 +753,8 @@ function DataTab() {
           </div>
         </div>
       )}
+
+      <CacheSettings config={config} distros={distros} patch={patch} />
 
       <FileCard title="Repos cache" stat={data.repos_tsv} extra={`${data.repo_count} repos`} />
       <FileCard
