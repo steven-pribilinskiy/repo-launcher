@@ -71,9 +71,13 @@ html[data-window="settings"] body {
   overflow: hidden;
 }
 
+/* The frameless window's East resize strip (ResizeHandles, 6px, z-20) sits on top
+   of the right edge, so a 6px scrollbar painted there is covered 100% and cannot
+   be grabbed at all. Reserve a 14px lane and paint the thumb in its inner 6px —
+   same visual weight, but the whole thumb clears the resize strip. */
 .repo-list::-webkit-scrollbar,
 .overflow-y-auto::-webkit-scrollbar {
-  width: 6px;
+  width: 14px;
 }
 
 .repo-list::-webkit-scrollbar-track,
@@ -85,6 +89,8 @@ html[data-window="settings"] body {
 .overflow-y-auto::-webkit-scrollbar-thumb {
   background: #9ca3af;
   border-radius: 3px;
+  border-right: 8px solid transparent;
+  background-clip: padding-box;
 }
 
 .dark .repo-list::-webkit-scrollbar-thumb,
