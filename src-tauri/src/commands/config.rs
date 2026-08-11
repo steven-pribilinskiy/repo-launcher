@@ -356,14 +356,53 @@ fn save_config_to_file(app: &AppHandle, config: &AppConfig) -> Result<(), String
     fs::write(&path, content).map_err(|err| err.to_string())
 }
 
+/// Whether the login-item registration actually points at THIS executable.
+///
+/// `is_enabled()` only asks whether an entry under our name exists — it never
+/// compares the target. So a registration written from a different location (an
+/// old build tree, a previous install dir) reads as "already enabled" forever,
+/// and every later version keeps launching that stale binary at login.
+#[cfg(target_os = "windows")]
+fn autostart_target_is_current(app: &AppHandle) -> bool {
+    use winreg::enums::{HKEY_CURRENT_USER, KEY_READ};
+    use winreg::RegKey;
+
+    let Ok(exe) = std::env::current_exe() else { return true };
+    let key = match RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey_with_flags(r"Software\Microsoft\Windows\CurrentVersion\Run", KEY_READ)
+    {
+        Ok(key) => key,
+        // Can't read it — assume correct rather than re-registering in a loop.
+        Err(_) => return true,
+    };
+    let Ok(value) = key.get_value::<String, _>(&app.package_info().name) else {
+        return true;
+    };
+    // auto-launch stores `<path> <args>`; compare only the executable.
+    let registered = value.trim().trim_matches('"').to_ascii_lowercase();
+    let expected = exe.to_string_lossy().to_ascii_lowercase();
+    registered == expected || registered.starts_with(&format!("{} ", expected))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn autostart_target_is_current(_app: &AppHandle) -> bool {
+    true
+}
+
 /// Reconcile the OS login-item registration with the desired state. Non-fatal:
 /// a failure to register (e.g. locked-down registry) shouldn't break saving the
 /// config — the rest of the settings still apply.
 pub fn sync_autostart(app: &AppHandle, desired: bool) {
     let manager = app.autolaunch();
-    let current = manager.is_enabled().unwrap_or(false);
-    if current == desired {
+    let registered = manager.is_enabled().unwrap_or(false);
+    // An entry that exists but names another executable must be rewritten, not
+    // left alone — otherwise login keeps starting whatever registered first.
+    let repoint = desired && registered && !autostart_target_is_current(app);
+    if registered == desired && !repoint {
         return;
+    }
+    if repoint {
+        log::info!("autostart: registration points elsewhere; re-registering this executable");
     }
     let result = if desired { manager.enable() } else { manager.disable() };
     if let Err(error) = result {
