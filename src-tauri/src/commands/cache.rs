@@ -818,6 +818,19 @@ pub fn set_sort(app: AppHandle, mode: u8) -> Result<Vec<Repo>, String> {
     ranked_repos(&config)
 }
 
+/// Persist the shared sort mode WITHOUT re-reading the cache.
+///
+/// The popup already holds every repo with its usage stats, so it can re-order
+/// locally in about a millisecond. Going through `set_sort` instead costs a cache
+/// re-read and a full list back over IPC — two `wsl.exe` spawns on a machine whose
+/// UNC share is unusable — which is what made clicking a column header feel slow.
+/// The write still lands in the shared `sort` file, so `fr`/`g` stay in sync.
+#[tauri::command]
+pub fn set_sort_mode(app: AppHandle, mode: u8) -> Result<(), String> {
+    let config = load_config(&app)?;
+    write_sort_mode(&config, mode.min(3))
+}
+
 // ── Data diagnostics ─────────────────────────────────────────────────────────
 
 #[derive(Serialize)]

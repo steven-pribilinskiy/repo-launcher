@@ -5,6 +5,7 @@ mod commands;
 
 use commands::cache::{
     cycle_sort, data_info, get_sort, maybe_refresh, read_repos, refresh_repos, set_sort,
+    set_sort_mode,
 };
 use commands::config::load_config;
 use commands::repos::{list_distros, run_action};
@@ -232,6 +233,7 @@ fn main() {
             get_sort,
             cycle_sort,
             set_sort,
+            set_sort_mode,
             data_info,
             run_action,
             commands::repos::open_path,

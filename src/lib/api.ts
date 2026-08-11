@@ -20,6 +20,10 @@ export const api = {
   /** Set the shared sort mode (0 alpha / 1 recent / 2 most-used / 3 type), re-ranked. */
   setSort: (mode: number) => invoke<Repo[]>("set_sort", { mode }),
 
+  /** Persist the shared sort mode only — no cache re-read, no list returned.
+   * The caller re-orders the repos it already has. */
+  setSortMode: (mode: number) => invoke<void>("set_sort_mode", { mode }),
+
   /** Run an action on a repo. Returns clipboard text for Clipboard actions. */
   runAction: (action: ActionDef, repo: Repo) =>
     invoke<string | null>("run_action", { action, repo }),

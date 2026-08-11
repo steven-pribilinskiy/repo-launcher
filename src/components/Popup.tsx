@@ -11,6 +11,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { useRepoSearch } from "@/hooks/useRepoSearch";
 import { useKeyboardNav } from "@/hooks/useKeyboardNav";
 import { useRepoStore, reloadThrottleMs } from "@/stores/repoStore";
+import { DEFAULT_SORT_DIR } from "@/lib/sortRepos";
 import { Onboarding } from "@/components/Onboarding";
 import { api } from "@/lib/api";
 import { applyTheme } from "@/lib/theme";
@@ -22,7 +23,6 @@ type View = "list" | "table";
 // The shared sort mode (0 alpha / 1 recent / 2 most-used) maps 1:1 to a sortable
 // table column, so Ctrl+S and the table headers stay in sync both ways.
 const COLUMN_BY_SORT_MODE: TableSortColumn[] = ["name", "last_used", "uses", "type"];
-const DIR_BY_SORT_MODE: ("asc" | "desc")[] = ["asc", "desc", "desc", "asc"];
 const SORT_MODE_BY_COLUMN: Partial<Record<TableSortColumn, number>> = {
   name: 0,
   last_used: 1,
@@ -59,13 +59,14 @@ export default function Popup() {
     lastLoadAt,
     multiDistro,
     sortMode,
+    sortDir,
+    applySort,
     sortError,
     config,
     loadConfig,
     loadRepos,
     refresh,
     cycleSort,
-    setSort,
   } = useRepoStore();
 
   const results = useRepoSearch(query, repos);
@@ -76,7 +77,7 @@ export default function Popup() {
   // Reflect the active sort mode in the table headers (and vice versa).
   const tableSort: TableSort = {
     column: COLUMN_BY_SORT_MODE[sortMode] ?? "uses",
-    dir: DIR_BY_SORT_MODE[sortMode] ?? "desc",
+    dir: sortDir,
   };
 
   const onActionComplete = useCallback(() => {
@@ -101,12 +102,21 @@ export default function Popup() {
     });
   }, []);
 
+  // Clicking the active column flips its direction; a different column starts in
+  // that mode's natural direction (A-Z for names, most-recent/most-used first).
   const onSort = useCallback(
     (column: TableSortColumn) => {
       const mode = SORT_MODE_BY_COLUMN[column];
-      if (mode !== undefined) void setSort(mode);
+      if (mode === undefined) return;
+      const dir =
+        mode === sortMode
+          ? sortDir === "asc"
+            ? "desc"
+            : "asc"
+          : DEFAULT_SORT_DIR[mode];
+      applySort(mode, dir);
     },
-    [setSort],
+    [applySort, sortMode, sortDir],
   );
 
   // Ticks once a second while the palette is open, just to keep the "Refresh

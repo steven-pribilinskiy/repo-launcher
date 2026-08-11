@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
+import { DEFAULT_SORT_DIR, sortRepos, type SortDir } from "@/lib/sortRepos";
 import type { AppConfig, Repo } from "@/types";
 
 /** Fallback throttle (minutes) before config has loaded — mirrors the Rust
@@ -43,6 +44,9 @@ type RepoStore = {
   error: string | null;
   config: AppConfig | null;
   sortMode: number;
+  /** Direction the active sort column is in. Local-only: the shared `sort` file is
+   * a single mode goto-repo also reads, and has no room for a direction. */
+  sortDir: SortDir;
   /** Why the last sort change failed, surfaced next to the sort control. A sort
    * writes the shared `sort` file, which can fail on its own (the repo list is
    * readable and unchanged), so it needs its own channel rather than `error`. */
@@ -56,8 +60,9 @@ type RepoStore = {
   loadConfig: () => Promise<void>;
   loadRepos: () => Promise<void>;
   refresh: () => Promise<void>;
-  cycleSort: () => Promise<void>;
-  setSort: (mode: number) => Promise<void>;
+  applySort: (mode: number, dir: SortDir) => void;
+  cycleSort: () => void;
+  setSort: (mode: number) => void;
 };
 
 export const useRepoStore = create<RepoStore>((set, get) => ({
@@ -67,6 +72,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
   error: null,
   config: null,
   sortMode: 2,
+  sortDir: DEFAULT_SORT_DIR[2],
   sortError: null,
   multiDistro: false,
   lastLoadAt: 0,
@@ -95,6 +101,7 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
       set({
         repos,
         sortMode,
+        sortDir: DEFAULT_SORT_DIR[sortMode] ?? "desc",
         hasLoaded: true,
         multiDistro: distros.size > 1,
         lastLoadAt: Date.now(),
@@ -134,21 +141,26 @@ export const useRepoStore = create<RepoStore>((set, get) => ({
     }
   },
 
-  cycleSort: async () => {
-    try {
-      const repos = await api.cycleSort();
-      set({ repos, sortMode: (get().sortMode + 1) % 4, sortError: null });
-    } catch (error) {
-      set({ sortError: String(error) });
-    }
+  /** Re-order in memory and persist the mode in the background. The click is
+   * applied on the spot; the shared-file write never blocks the UI. */
+  applySort: (mode: number, dir: SortDir) => {
+    const normalized = ((mode % 4) + 4) % 4;
+    set({
+      repos: sortRepos(get().repos, normalized, dir),
+      sortMode: normalized,
+      sortDir: dir,
+      sortError: null,
+    });
+    api.setSortMode(normalized).catch((error) => set({ sortError: String(error) }));
   },
 
-  setSort: async (mode: number) => {
-    try {
-      const repos = await api.setSort(mode);
-      set({ repos, sortMode: mode % 4, sortError: null });
-    } catch (error) {
-      set({ sortError: String(error) });
-    }
+  cycleSort: () => {
+    const next = (get().sortMode + 1) % 4;
+    get().applySort(next, DEFAULT_SORT_DIR[next]);
+  },
+
+  setSort: (mode: number) => {
+    const normalized = ((mode % 4) + 4) % 4;
+    get().applySort(normalized, DEFAULT_SORT_DIR[normalized]);
   },
 }));
