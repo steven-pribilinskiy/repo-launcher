@@ -120,12 +120,16 @@ fn restore_focus() -> bool {
     if target == 0 || unsafe { win::IsWindow(target as *mut _) } == 0 {
         return false;
     }
-    // Allowed: we are the foreground process at this point, so we may give it away.
-    unsafe { win::SetForegroundWindow(target as *mut _) };
+    // Retried rather than called once: the popup's hide() is posted to the event
+    // loop, so an early attempt can be rejected while we are still the foreground
+    // window, and a single call would then lose the race silently.
+    // Allowed at all because we are the foreground PROCESS — a process may give
+    // the foreground away even though it cannot take it.
     for _ in 0..FOCUS_POLLS {
         if unsafe { win::GetForegroundWindow() } as isize == target {
             return true;
         }
+        unsafe { win::SetForegroundWindow(target as *mut _) };
         std::thread::sleep(std::time::Duration::from_millis(FOCUS_POLL_MS));
     }
     false
