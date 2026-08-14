@@ -11,6 +11,9 @@ use tauri_plugin_autostart::ManagerExt;
 pub enum ActionKind {
     /// Copy a substituted string to the clipboard.
     Clipboard,
+    /// Deliver a substituted string into the window that had focus before the
+    /// popup opened, without going through the clipboard where the OS allows it.
+    Paste,
     /// Spawn a program with substituted args.
     Exec,
     /// Launch an agent CLI (resolved from its group's harness) in a terminal.
@@ -30,7 +33,7 @@ pub struct ActionDef {
     #[serde(default = "default_true")]
     pub enabled: bool,
     pub kind: ActionKind,
-    /// "primary" (Enter) or "alternative" (Alt+Enter); independent of `hotkey`.
+    /// "primary" (Enter) or "alternative" (Shift+Enter); independent of `hotkey`.
     #[serde(default)]
     pub role: Option<String>,
     #[serde(default)]
@@ -129,6 +132,15 @@ pub struct AppConfig {
     /// Default terminal for agent-harness launches ("wt" | "tabby").
     #[serde(default = "default_terminal")]
     pub preferred_terminal: String,
+    /// Paste actions type their text as keystrokes, leaving the clipboard alone.
+    /// Off = always clipboard + Ctrl+V. Either way a refused attempt falls through
+    /// to the rung below it.
+    #[serde(default = "default_true")]
+    pub paste_without_clipboard: bool,
+    /// Which generation of built-in actions this config has seen. Bumping
+    /// `BUILTIN_ACTIONS_REV` backfills the newly-added ones exactly once.
+    #[serde(default)]
+    pub builtin_actions_rev: u8,
 }
 
 fn default_true() -> bool {
@@ -171,9 +183,15 @@ impl Default for AppConfig {
             actions: default_actions(),
             groups: default_groups(),
             preferred_terminal: default_terminal(),
+            paste_without_clipboard: true,
+            builtin_actions_rev: BUILTIN_ACTIONS_REV,
         }
     }
 }
+
+/// Bump when `default_actions()` gains an entry that existing configs should get.
+/// 1 = `paste-path`.
+const BUILTIN_ACTIONS_REV: u8 = 1;
 
 // Group ids shared between default_groups() and default_actions().
 const GRP_COPY: &str = "grp-copy";
@@ -181,13 +199,13 @@ const GRP_TERMINALS: &str = "grp-terminals";
 const GRP_EDITORS: &str = "grp-editors";
 const GRP_AGENT_CLAUDE: &str = "grp-agent-claude";
 
-fn clipboard(id: &str, label: &str, hotkey: &str, enabled: bool, group: &str, template: &str) -> ActionDef {
+fn templated(kind: ActionKind, id: &str, label: &str, hotkey: &str, enabled: bool, group: &str, template: &str) -> ActionDef {
     ActionDef {
         id: id.to_string(),
         label: label.to_string(),
         hotkey: hotkey.to_string(),
         enabled,
-        kind: ActionKind::Clipboard,
+        kind,
         role: None,
         template: Some(template.to_string()),
         program: None,
@@ -255,13 +273,24 @@ pub fn default_groups() -> Vec<ActionGroup> {
 pub fn default_actions() -> Vec<ActionDef> {
     // Primary (Enter) copies the POSIX path (/home/...) — what's pasted most in a
     // WSL workflow. The Windows UNC path is a separate Alt+P action on Windows.
-    let mut actions = vec![clipboard("copy-path", "Copy path", "", true, GRP_COPY, "{wslpath}")];
+    let mut actions = vec![templated(ActionKind::Clipboard, "copy-path", "Copy path", "", true, GRP_COPY, "{wslpath}")];
     actions[0].role = Some("primary".to_string());
 
+    // Shift+Enter: the same path, delivered straight into the window the popup
+    // interrupted. Windows-only — it is the only platform with an input-synthesis
+    // seam here, so elsewhere it would be a copy wearing another label.
     #[cfg(target_os = "windows")]
-    actions.push(clipboard("copy-win", "Copy Windows path", "Alt+P", true, GRP_COPY, "{winpath}"));
+    {
+        let mut paste_path =
+            templated(ActionKind::Paste, "paste-path", "Paste path", "", true, GRP_COPY, "{wslpath}");
+        paste_path.role = Some("alternative".to_string());
+        actions.push(paste_path);
+    }
 
-    actions.push(clipboard("copy-name", "Copy folder name", "Alt+N", true, GRP_COPY, "{name}"));
+    #[cfg(target_os = "windows")]
+    actions.push(templated(ActionKind::Clipboard, "copy-win", "Copy Windows path", "Alt+P", true, GRP_COPY, "{winpath}"));
+
+    actions.push(templated(ActionKind::Clipboard, "copy-name", "Copy folder name", "Alt+N", true, GRP_COPY, "{name}"));
 
     #[cfg(target_os = "windows")]
     {
@@ -330,6 +359,21 @@ pub fn default_actions() -> Vec<ActionDef> {
     actions
 }
 
+/// Append every built-in action the config has never seen, matched by id. Existing
+/// entries — including edited or re-ordered ones — are left exactly as they are, so
+/// this can only add. Returns how many were added.
+fn merge_missing_builtins(actions: &mut Vec<ActionDef>, builtins: Vec<ActionDef>) -> usize {
+    let known: std::collections::HashSet<String> =
+        actions.iter().map(|action| action.id.clone()).collect();
+    let missing: Vec<ActionDef> = builtins
+        .into_iter()
+        .filter(|builtin| !known.contains(&builtin.id))
+        .collect();
+    let added = missing.len();
+    actions.extend(missing);
+    added
+}
+
 fn config_path(app: &AppHandle) -> PathBuf {
     let app_dir = app.path().app_data_dir().expect("Failed to get app data dir");
     app_dir.join("config.json")
@@ -339,7 +383,16 @@ pub fn load_config(app: &AppHandle) -> Result<AppConfig, String> {
     let path = config_path(app);
     if path.exists() {
         let content = fs::read_to_string(&path).map_err(|err| err.to_string())?;
-        serde_json::from_str(&content).map_err(|err| err.to_string())
+        let mut config: AppConfig = serde_json::from_str(&content).map_err(|err| err.to_string())?;
+        if config.builtin_actions_rev < BUILTIN_ACTIONS_REV {
+            let added = merge_missing_builtins(&mut config.actions, default_actions());
+            config.builtin_actions_rev = BUILTIN_ACTIONS_REV;
+            if added > 0 {
+                log::info!("config: backfilled {} built-in action(s)", added);
+            }
+            save_config_to_file(app, &config)?;
+        }
+        Ok(config)
     } else {
         let config = AppConfig::default();
         save_config_to_file(app, &config)?;
@@ -441,4 +494,53 @@ pub fn reset_config(app: AppHandle) -> Result<AppConfig, String> {
 #[tauri::command]
 pub fn default_config() -> AppConfig {
     AppConfig::default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn action(id: &str) -> ActionDef {
+        templated(ActionKind::Clipboard, id, id, "", true, GRP_COPY, "{path}")
+    }
+
+    #[test]
+    fn merge_adds_only_unknown_ids() {
+        let mut actions = vec![action("copy-path"), action("mine")];
+        let added = merge_missing_builtins(&mut actions, vec![action("copy-path"), action("paste-path")]);
+        assert_eq!(added, 1);
+        let ids: Vec<&str> = actions.iter().map(|item| item.id.as_str()).collect();
+        assert_eq!(ids, ["copy-path", "mine", "paste-path"]);
+    }
+
+    #[test]
+    fn merge_never_overwrites_an_edited_builtin() {
+        let mut mine = action("copy-path");
+        mine.label = "My own label".into();
+        mine.enabled = false;
+        let mut actions = vec![mine];
+        let added = merge_missing_builtins(&mut actions, vec![action("copy-path")]);
+        assert_eq!(added, 0);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].label, "My own label");
+        assert!(!actions[0].enabled);
+    }
+
+    #[test]
+    fn merge_is_idempotent() {
+        let mut actions = vec![action("copy-path")];
+        let builtins = || vec![action("copy-path"), action("paste-path")];
+        assert_eq!(merge_missing_builtins(&mut actions, builtins()), 1);
+        assert_eq!(merge_missing_builtins(&mut actions, builtins()), 0);
+        assert_eq!(actions.len(), 2);
+    }
+
+    /// A config written before the field existed must still deserialize, and land
+    /// on rev 0 so the backfill runs for it exactly once.
+    #[test]
+    fn config_without_the_rev_field_defaults_to_zero() {
+        let config: AppConfig = serde_json::from_str("{}").expect("bare config should load");
+        assert_eq!(config.builtin_actions_rev, 0);
+        assert!(config.paste_without_clipboard);
+    }
 }

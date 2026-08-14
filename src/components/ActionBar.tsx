@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   AlertTriangle,
+  ArrowBigUp,
   CornerDownLeft,
   GripHorizontal,
   List as ListIcon,
@@ -70,6 +71,12 @@ export function ActionBar({
     enabled.find((action) => action.role === "primary") ??
     enabled.find((action) => action.hotkey === "Enter") ??
     enabled[0];
+  // Resolved exactly as the Shift+Enter handler does — no enabled[0] fallback,
+  // because an unset alternative means the chord genuinely does nothing and the
+  // bar must not advertise it. (`primary` above keeps its older fallback.)
+  const alternative =
+    enabled.find((action) => action.role === "alternative") ??
+    enabled.find((action) => action.hotkey === "Shift+Enter");
 
   return (
     <div
@@ -89,6 +96,25 @@ export function ActionBar({
             </Kbd>
             <span className="max-w-[180px] truncate text-[11px] text-zinc-600 dark:text-zinc-300">
               {primary.label}
+            </span>
+          </button>
+        )}
+
+        {hasSelection && alternative && (
+          <button
+            type="button"
+            onClick={() => onRun(alternative)}
+            title={alternative.label}
+            className="flex items-center gap-1.5 rounded px-1.5 py-0.5 hover:bg-zinc-200/60 dark:hover:bg-zinc-700/60"
+          >
+            <Kbd>
+              <span className="inline-flex items-center gap-0.5">
+                <ArrowBigUp className="inline h-3 w-3" />
+                <CornerDownLeft className="inline h-3 w-3" />
+              </span>
+            </Kbd>
+            <span className="max-w-[180px] truncate text-[11px] text-zinc-600 dark:text-zinc-300">
+              {alternative.label}
             </span>
           </button>
         )}

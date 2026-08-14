@@ -197,6 +197,18 @@ pub fn run_action(app: AppHandle, action: ActionDef, repo: Repo) -> Result<Optio
             let template = action.template.unwrap_or_default();
             Some(substitute(&template, &repo))
         }
+        ActionKind::Paste => {
+            let template = action.template.unwrap_or_default();
+            let text = substitute(&template, &repo);
+            let prefer_direct = config
+                .as_ref()
+                .map(|config| config.paste_without_clipboard)
+                .unwrap_or(true);
+            // Owns hiding the popup and writing the clipboard on the fallback rung,
+            // so the whole sequence stays on one side of the IPC boundary.
+            super::paste::deliver(&app, text, prefer_direct);
+            None
+        }
         ActionKind::Exec => {
             let program = action
                 .program

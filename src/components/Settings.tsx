@@ -70,8 +70,13 @@ function actionIncompleteReason(action: ActionDef): string | null {
     return "No trigger — set a hotkey, or make it primary/alternative, or it won't appear in the popup.";
   }
   if (action.kind === "exec" && !action.program?.trim()) return "No program set.";
-  if (action.kind === "clipboard" && !action.template?.trim()) return "No template to copy.";
+  if (hasTemplate(action.kind) && !action.template?.trim()) return "No template set.";
   return null;
+}
+
+/** Kinds driven by a `{placeholder}` template rather than a program + args. */
+function hasTemplate(kind: ActionKind): boolean {
+  return kind === "clipboard" || kind === "paste";
 }
 
 function countIncomplete(actions: ActionDef[]): number {
@@ -394,6 +399,21 @@ function GeneralTab({
           label="Launch at startup (start automatically when you log in)"
         />
         <DesktopShortcutButton />
+      </Section>
+
+      <Section title="Paste to active app">
+        <Toggle
+          checked={config.paste_without_clipboard}
+          onChange={(value) => patch({ paste_without_clipboard: value })}
+          label="Paste without the clipboard"
+        />
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          Shift+Enter sends the text straight to the window the popup interrupted, typing it as
+          keystrokes so whatever you had copied survives. A window that refuses synthesized input
+          (anything running elevated) falls back to clipboard + Ctrl+V, and if that is refused too
+          the text is left on the clipboard to paste by hand. Turn this off to always use
+          clipboard + Ctrl+V. Windows only — elsewhere a paste action just copies.
+        </p>
       </Section>
     </div>
   );
@@ -1200,7 +1220,7 @@ function ActionsTab({
               }}
               active={actions[kebab.index].role === "alternative"}
             >
-              Make alternative (Alt+Enter)
+              Make alternative (Shift+Enter)
             </KebabItem>
             {actions[kebab.index].role && (
               <KebabItem
@@ -1239,7 +1259,7 @@ function ActionsTab({
 
 function TriggerBadge({ action }: { action: ActionDef }) {
   const text =
-    action.role === "primary" ? "Enter" : action.role === "alternative" ? "Alt+Enter" : action.hotkey;
+    action.role === "primary" ? "Enter" : action.role === "alternative" ? "Shift+Enter" : action.hotkey;
   if (!text) return <span className="text-xs text-zinc-300 dark:text-zinc-600">—</span>;
   return (
     <kbd className="w-fit rounded bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">
@@ -1482,6 +1502,7 @@ function ActionEditor({
           onChange={(event) => onChange({ kind: event.target.value as ActionKind })}
         >
           <option value="clipboard">Clipboard (copy a string)</option>
+          <option value="paste">Paste (into the active app)</option>
           <option value="exec">Exec (run a program)</option>
         </select>
       </label>
@@ -1500,9 +1521,11 @@ function ActionEditor({
           ))}
         </select>
       </label>
-      {action.kind === "clipboard" ? (
+      {hasTemplate(action.kind) ? (
         <label className="col-span-2 flex flex-col gap-1">
-          <span className={labelCls}>Copies (template)</span>
+          <span className={labelCls}>
+            {action.kind === "paste" ? "Pastes (template)" : "Copies (template)"}
+          </span>
           <input
             className={inputCls}
             value={action.template ?? ""}

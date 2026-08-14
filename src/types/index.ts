@@ -7,7 +7,7 @@ export type Repo = {
   last_used: number;
 };
 
-export type ActionKind = "clipboard" | "exec" | "agent" | "system";
+export type ActionKind = "clipboard" | "exec" | "agent" | "paste" | "system";
 
 /** Id of the built-in "Refresh repos cache" system action (synthesized in
  * Popup.tsx for the palette — frontend-only, never persisted to config). */
@@ -39,7 +39,7 @@ export type ActionDef = {
   hotkey: string;
   enabled: boolean;
   kind: ActionKind;
-  /** "primary" fires on Enter, "alternative" on Alt+Enter; independent of hotkey. */
+  /** "primary" fires on Enter, "alternative" on Shift+Enter; independent of hotkey. */
   role?: ActionRole | null;
   template?: string | null;
   program?: string | null;
@@ -131,6 +131,12 @@ export type AppConfig = {
   groups: ActionGroup[];
   /** Default terminal for agent-harness launches ("wt" | "tabby"). */
   preferred_terminal: TerminalKind;
+  /** Paste actions type their text as keystrokes, leaving the clipboard alone.
+   * Off = always clipboard + Ctrl+V. Windows only; elsewhere a paste is a copy. */
+  paste_without_clipboard: boolean;
+  /** Which generation of built-in actions this config has seen — drives the
+   * one-shot backfill in the Rust `load_config`. Never edited from the UI. */
+  builtin_actions_rev: number;
 };
 
 export type FuzzyResult = {

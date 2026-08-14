@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ClipboardPaste,
   Code,
   Copy,
   CornerDownLeft,
@@ -21,6 +22,7 @@ function actionIcon(action: ActionDef): LucideIcon {
   if (action.kind === "system") return RefreshCw;
   if (action.kind === "agent") return Sparkles;
   if (action.kind === "clipboard") return Copy;
+  if (action.kind === "paste") return ClipboardPaste;
   const hay = `${action.label} ${action.program ?? ""}`.toLowerCase();
   if (/(tabby|terminal|\bwsl\b|shell|\bcmd\b|bash|\bwt\b)/.test(hay)) return Terminal;
   if (/(explorer|finder|files|folder|nautilus)/.test(hay)) return FolderOpen;
@@ -31,7 +33,7 @@ function actionIcon(action: ActionDef): LucideIcon {
 /** The trigger split into individual key chips, e.g. "Alt+Shift+C" → [Alt,Shift,C]. */
 function triggerKeys(action: ActionDef): string[] {
   if (action.role === "primary") return ["Enter"];
-  if (action.role === "alternative") return ["Alt", "Enter"];
+  if (action.role === "alternative") return ["Shift", "Enter"];
   if (!action.hotkey) return [];
   return action.hotkey.split("+").map((part) => part.trim()).filter(Boolean);
 }

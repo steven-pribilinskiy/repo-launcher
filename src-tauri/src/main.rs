@@ -187,6 +187,7 @@ fn main() {
                 // the onboarding (they don't know the hotkey yet).
                 if std::env::var_os("REPO_LAUNCHER_SHOW_ON_START").is_some() || !config.onboarded {
                     commands::window_state::mark_activity();
+                    commands::paste::remember_foreground();
                     let _ = window.show();
                     let _ = window.set_focus();
                     let _ = window.emit("window-shown", ());
@@ -281,6 +282,9 @@ fn toggle_window(app: &tauri::AppHandle) {
                 let _ = window.center();
             }
             commands::window_state::mark_activity();
+            // Before show(): a Paste action hands the foreground back to whatever
+            // the popup interrupted, and after show() that is the popup itself.
+            commands::paste::remember_foreground();
             let show_start = std::time::Instant::now();
             let _ = window.show();
             let _ = window.set_focus();

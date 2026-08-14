@@ -41,22 +41,40 @@ Built-in defaults (Windows), all editable/removable:
 
 | Action | Hotkey | Default |
 |---|---|---|
-| Copy absolute path | **Enter** (primary) | clipboard `{winpath}` |
-| Copy WSL path | Alt+P | clipboard `{wslpath}` |
+| Copy path | **Enter** (primary) | clipboard `{wslpath}` |
+| Paste path | **Shift+Enter** (alternative) | paste `{wslpath}` into the active app |
+| Copy Windows path | Alt+P | clipboard `{winpath}` |
 | Copy folder name | Alt+N | clipboard `{name}` |
-| Open in Tabby | Alt+B | `Tabby.exe open {winpath}` |
-| Open in Windows Terminal | Alt+T | `wt.exe -p {distro} -d {winpath}` |
+| Open in Tabby | Alt+T | `Tabby.exe run -- wsl.exe -d {distro} --cd {wslpath}` |
+| Open in Windows Terminal | Alt+W | `wt.exe -w 0 nt -p {distro} -d {winpath}` |
 | Open in explorer.exe | Alt+E | `explorer.exe {winpath}` |
-| Open WSL shell here | Alt+S | `cmd /c start "" wsl.exe -d {distro} --cd {wslpath}` |
+| Open WSL shell here | Alt+S | `wt.exe -w 0 nt wsl.exe -d {distro} --cd {wslpath}` |
 | Open in VS Code | Alt+V | *(disabled by default)* `code --folder-uri {vscode_uri}` |
 | Open in Cursor | Alt+R | *(disabled by default)* `cursor --folder-uri {vscode_uri}` |
 | Open in Zed | Alt+Z | *(disabled by default)* |
+| Claude Code | Alt+C | agent harness, in the preferred terminal |
+| Claude Code — resume | Alt+Shift+C | agent harness `--resume` |
 
-The primary action (the one bound to **Enter**) fires when you press Enter on a
-selection. Clicking an action in the bottom bar runs it on the highlighted folder.
+Two chords are role-based rather than hotkey-based: **Enter** runs whichever action
+is marked *primary*, **Shift+Enter** the *alternative*. Set either from an action's
+⋮ menu in Settings. Clicking an action in the bottom bar runs it on the highlighted
+folder.
 
-Add your own with **Add action** in Settings: pick Clipboard (copies a template) or
-Exec (runs a program with args, one per line), set a hotkey, done.
+### Paste vs copy
+
+**Copy** puts the path on the clipboard. **Paste** delivers it into the window the
+popup interrupted, typing it as keystrokes so whatever you already had copied
+survives — useful for dropping a path into a terminal you were already in.
+
+The ladder degrades rather than failing: a window that refuses synthesized input
+(anything running elevated) falls back to clipboard + Ctrl+V, and if that is refused
+too the text is left on the clipboard to paste by hand. Turn *Paste without the
+clipboard* off in **Settings → General** to always use clipboard + Ctrl+V. Windows
+only — elsewhere a paste action just copies.
+
+Add your own with **Add action** in Settings: pick Clipboard (copies a template),
+Paste (delivers a template to the active app) or Exec (runs a program with args, one
+per line), set a hotkey, done.
 
 ### Custom command notes
 

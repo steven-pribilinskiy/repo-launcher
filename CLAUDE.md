@@ -55,10 +55,19 @@ every Windows `Command`.
 
 **Config.** `AppConfig` (config.rs) persists to `app_data_dir()/config.json`
 (`%APPDATA%\com.stevenp.repo-launcher\config.json` on Windows). Its `actions`/`groups` registry drives
-the popup's action bar. An `ActionDef` has one of three `ActionKind`s: `Clipboard` (returns text the
-frontend copies), `Exec` (spawns program + args), `Agent` (launches an agent CLI in a terminal at the
-repo). Command strings use `{path}`/`{wslpath}`, `{winpath}`, `{name}`, `{distro}`, `{vscode_uri}`
+the popup's action bar. An `ActionDef` has one of four `ActionKind`s: `Clipboard` (returns text the
+frontend copies), `Paste` (delivers text into the previously-focused window — see below), `Exec`
+(spawns program + args), `Agent` (launches an agent CLI in a terminal at the repo). Command strings use `{path}`/`{wslpath}`, `{winpath}`, `{name}`, `{distro}`, `{vscode_uri}`
 placeholders — substituted by `substitute()` in `repos.rs`.
+
+**The paste seam.** `commands/paste.rs` delivers a string into the window that had focus *before* the
+popup opened, so `remember_foreground()` must be called BEFORE every `window.show()` — after it, the
+foreground is the popup itself and the paste targets us. It is a three-rung ladder: synthesized Unicode
+keystrokes (clipboard untouched) → clipboard + Ctrl+V → leave it on the clipboard and log. A rung is
+only taken when the one above it was *refused*, detected by `SendInput` accepting fewer events than it
+was handed (error 5 = UIPI, an elevated target). Two non-obvious constraints, both of which cost real
+time elsewhere: `SendInput` batches are chunked (`CHUNK_UNITS`) because one oversized batch arrives
+scrambled, and it rejects an empty buffer outright. Windows-only; other platforms degrade to a copy.
 
 **Frontend data flow.** `src/lib/api.ts` is the entire IPC surface — typed `invoke()` wrappers, one per
 Rust command. `src/stores/repoStore.ts` (zustand) is the only state store. Ranking happens in Rust:
@@ -73,6 +82,18 @@ Rust command. `src/stores/repoStore.ts` (zustand) is the only state store. Ranki
   the CLI binary + dangerous-permissions flag per harness must stay in sync across both.
 - **Version lives in three files** — `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`.
   Bump all together (patch for fixes, minor for features).
+- **Enter/Shift+Enter are ROLE-based, not hotkey-based** — they run whichever enabled action carries
+  `role: "primary"` / `"alternative"`, resolved in both `useKeyboardNav.ts` and `ActionBar.tsx`. Change
+  one and you must change the other, or the bar advertises a chord that runs something else. One known
+  divergence: the bar's `primary` additionally falls back to the first enabled action, which the Enter
+  handler does not — so a config with no primary role shows ⏎ against an action Enter won't run.
+- **A `#[cfg(target_os = "windows")]` block is INVISIBLE to `make build`/`make test` on WSL** — both
+  gates pass while the Windows path is broken, and CI only finds it on the native build. Cross-check it
+  with `cargo check --target x86_64-pc-windows-gnu` (the target is installed; the whole crate compiles
+  under it), and confirm the check actually covers your block by sabotaging it once.
+- **New built-in actions need a `BUILTIN_ACTIONS_REV` bump** (config.rs), or they only ever reach fresh
+  installs — an existing `config.json` is never re-seeded from `default_actions()`. The backfill appends
+  by id and only adds, so it can't clobber an edited or re-ordered action, and it runs exactly once.
 - **Sort mode is a `u8` cycled `% 4`** (0 alpha / 1 recent / 2 most-used / 3 type). Both the Ctrl+S cycle
   and table-header clicks write the shared `sort` file (`cycle_sort` / `set_sort`) so they never diverge.
 - **The popup is never closed, only hidden** — `CloseRequested` calls `prevent_close()`; the app exits
