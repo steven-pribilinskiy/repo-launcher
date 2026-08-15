@@ -16,6 +16,10 @@ const BUILT_UNIX: &str = env!("REPO_LAUNCHER_BUILT_UNIX");
 pub struct BuildInfo {
     pub version: String,
     pub built_unix: u64,
+    /// `std::env::consts::OS` — "windows" | "linux" | "macos". The Updates tab
+    /// needs it to say which settings apply, and this is already the build-facts
+    /// command, so it rides along rather than earning an IPC command of its own.
+    pub platform: String,
 }
 
 /// Version + build time (embedded at compile time), for the settings footer.
@@ -24,6 +28,7 @@ pub fn app_build_info() -> BuildInfo {
     BuildInfo {
         version: VERSION.to_string(),
         built_unix: BUILT_UNIX.parse().unwrap_or(0),
+        platform: std::env::consts::OS.to_string(),
     }
 }
 

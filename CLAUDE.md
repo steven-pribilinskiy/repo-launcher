@@ -82,6 +82,18 @@ Rust command. `src/stores/repoStore.ts` (zustand) is the only state store. Ranki
   the CLI binary + dangerous-permissions flag per harness must stay in sync across both.
 - **Version lives in three files** — `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`.
   Bump all together (patch for fixes, minor for features).
+- **A version bump is NOT a release, and pushing `main` does not ship anything.** The bump only changes
+  what the app reports about itself. `.github/workflows/build-windows.yml` publishes a GitHub Release
+  **only on a `v*` tag push** (`if: startsWith(github.ref, 'refs/tags/')`); a push to `main` runs the
+  same build but leaves the installer as a run *artifact* and skips the release step. `update.rs` asks
+  `releases/latest`, so until the tag exists every installed copy correctly reports the previous version
+  as newest and offers no update — the work is on `main` and on nobody's machine. Finish a bump with:
+
+  ```bash
+  git tag v0.13.0 && git push origin v0.13.0   # the tag is what cuts the release
+  ```
+
+  Say "pushed to main" or "released", never "shipped", until that tag exists.
 - **Enter/Shift+Enter are ROLE-based, not hotkey-based** — they run whichever enabled action carries
   `role: "primary"` / `"alternative"`, resolved in both `useKeyboardNav.ts` and `ActionBar.tsx`. Change
   one and you must change the other, or the bar advertises a chord that runs something else. One known

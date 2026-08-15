@@ -253,7 +253,7 @@ export default function Settings() {
 
       <div className="flex-1 overflow-y-auto px-6 py-5">
         {tab === "general" && <GeneralTab config={config} patch={patch} />}
-        {tab === "updates" && <UpdatesTab config={config} patch={patch} />}
+        {tab === "updates" && <UpdatesTab config={config} patch={patch} build={build} />}
         {tab === "actions" && (
           <ActionsTab
             actions={config.actions}
@@ -543,10 +543,16 @@ function DesktopShortcutButton() {
 function UpdatesTab({
   config,
   patch,
+  build,
 }: {
   config: AppConfig;
   patch: (changes: Partial<AppConfig>) => void;
+  build: BuildInfo | null;
 }) {
+  // Until the build info lands, assume the setting applies rather than showing it
+  // greyed out and then enabling it — a control that changes state under the
+  // reader is worse than one that is briefly optimistic.
+  const restartApplies = build ? build.platform !== "windows" : true;
   const [check, setCheck] = useState<UpdateCheck | null>(null);
   const [checking, setChecking] = useState(false);
 
@@ -607,12 +613,19 @@ function UpdatesTab({
       <Toggle
         checked={config.notify_on_update}
         onChange={(value) => patch({ notify_on_update: value })}
-        label="Notify me when a new version is published, and after updating"
+        label="Show desktop notifications about updates"
+        hint="Two of them: one when a newer release is published on GitHub, and one after this app has updated itself. Neither installs anything — updating is always your click."
       />
       <Toggle
         checked={config.auto_restart_on_update}
         onChange={(value) => patch({ auto_restart_on_update: value })}
-        label="Restart automatically when the app file is replaced (Linux/macOS only — on Windows the installer does the restart)"
+        disabled={!restartApplies}
+        label="Relaunch the app when its own file is replaced"
+        hint={
+          restartApplies
+            ? "Watches this app’s executable and relaunches once a new build overwrites it, so the running app isn’t left on the old version."
+            : "Does nothing on Windows, whichever way it is set: the running .exe is locked, so a new build can never overwrite it in place. The installer closes this app, replaces it, and relaunches it itself."
+        }
       />
       <div className="pt-2">
         <button
@@ -634,23 +647,34 @@ function Toggle({
   checked,
   onChange,
   label,
+  hint,
+  disabled,
   className,
 }: {
   checked: boolean;
   onChange: (value: boolean) => void;
   label: string;
+  /** One line under the label saying what the setting actually does. */
+  hint?: ReactNode;
+  /** The setting exists but does nothing here — shown, dimmed, and unclickable,
+   * so its stored value is still visible rather than silently misreported. */
+  disabled?: boolean;
   className?: string;
 }) {
   return (
-    <label className={`flex items-center gap-2 ${className ?? ""}`}>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        className="h-4 w-4 accent-indigo-600"
-      />
-      <span className="text-sm">{label}</span>
-    </label>
+    <div className={className}>
+      <label className={`flex items-center gap-2 ${disabled ? "cursor-not-allowed opacity-60" : ""}`}>
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.checked)}
+          className="h-4 w-4 accent-indigo-600"
+        />
+        <span className="text-sm">{label}</span>
+      </label>
+      {hint && <p className="ml-6 mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{hint}</p>}
+    </div>
   );
 }
 

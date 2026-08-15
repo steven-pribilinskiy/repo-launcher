@@ -64,6 +64,8 @@ export const AGENT_HARNESSES: Record<AgentHarness, { label: string; cli: string;
 export type BuildInfo = {
   version: string;
   built_unix: number;
+  /** "windows" | "linux" | "macos" — which settings actually apply here. */
+  platform: string;
 };
 
 export type UpdateCheck = {
