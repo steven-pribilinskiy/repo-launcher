@@ -49,7 +49,10 @@ with the `fr`/`g` shell finders. Never fork this state into a private store.
 On Windows the cache lives in WSL and is read over `\\wsl.localhost\<distro>\…` UNC paths; the distro is
 resolved from the WSL registry (`Lxss`), never `wsl --list` (which cold-starts the VM — the dominant
 startup cost). Distro + `$HOME` are primed once and cached in config. Linux/macOS use native
-`~/.cache/goto-repo` + `~/.config/goto-repo`. **Startup latency is a first-class constraint** — don't add
+`~/.cache/…` + `~/.config/…`. The data dirs are `shell-finders`; `goto-repo` is a compat **symlink**, and
+Windows cannot traverse a WSL symlink over UNC ("The directory name is invalid"), so `finder_dir()` must
+name the real dir. When UNC reads fail, check for a symlink with `cmd.exe /c type \\wsl.localhost\…` before
+blaming a stale 9P cache. **Startup latency is a first-class constraint** — don't add
 `wsl.exe` spawns on the launch hot path, and keep `creation_flags(0x0800_0000)` (`CREATE_NO_WINDOW`) on
 every Windows `Command`.
 

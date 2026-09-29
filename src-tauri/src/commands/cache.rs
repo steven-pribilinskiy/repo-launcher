@@ -203,11 +203,8 @@ fn wsl_posix_dirs(_config: &AppConfig) -> Option<(String, String)> {
     None
 }
 
-/// Read a file's contents via `wsl.exe -d <distro> -- cat <posix>`. Immune to the
-/// Windows-side 9P directory cache going stale — which makes a file that exists in
-/// WSL read as "not found" over the `\\wsl.localhost` UNC share (the file is
-/// rewritten inside WSL by `find-repo --rebuild`, so Windows caches an old view of
-/// the directory and never sees the current inode).
+/// Read a file's contents via `wsl.exe -d <distro> -- cat <posix>`, for when the
+/// `\\wsl.localhost` UNC read fails (share down, or a path through a WSL symlink).
 #[cfg(target_os = "windows")]
 fn wsl_cat(distro: &str, posix_path: &str) -> Result<String, String> {
     use std::os::windows::process::CommandExt;
