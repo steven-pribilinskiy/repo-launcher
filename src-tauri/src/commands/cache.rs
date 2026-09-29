@@ -61,8 +61,8 @@ fn goto_dirs(config: &AppConfig) -> Result<(PathBuf, PathBuf), String> {
             PathBuf::from(format!("{}{}", base, posix.replace('/', "\\")))
         };
         Ok((
-            to_unc(format!("{}/.cache/goto-repo", home)),
-            to_unc(format!("{}/.config/goto-repo", home)),
+            finder_dir(to_unc(format!("{}/.cache", home))),
+            finder_dir(to_unc(format!("{}/.config", home))),
         ))
     }
 
@@ -70,10 +70,29 @@ fn goto_dirs(config: &AppConfig) -> Result<(PathBuf, PathBuf), String> {
     {
         let home = dirs::home_dir().ok_or("Cannot resolve home dir")?;
         Ok((
-            home.join(".cache").join("goto-repo"),
-            home.join(".config").join("goto-repo"),
+            finder_dir(home.join(".cache")),
+            finder_dir(home.join(".config")),
         ))
     }
+}
+
+/// The real data dir under `~/.cache` or `~/.config`: `shell-finders`, else a plain
+/// `goto-repo` dir. `goto-repo` is normally a symlink to `shell-finders`, and a WSL
+/// symlink is untraversable over `\\wsl.localhost` ("The directory name is invalid").
+/// Only hits are memoized, so a `shell-finders` dir created later is still found.
+fn finder_dir(parent: PathBuf) -> PathBuf {
+    static FOUND: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> =
+        std::sync::OnceLock::new();
+    let found = FOUND.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+    let current = parent.join("shell-finders");
+    if found.lock().unwrap().contains(&current) {
+        return current;
+    }
+    if current.is_dir() {
+        found.lock().unwrap().insert(current.clone());
+        return current;
+    }
+    parent.join("goto-repo")
 }
 
 /// If the cache dir override sits under a `.cache/goto-repo` segment, point the
@@ -519,7 +538,7 @@ fn fill_bundle_from_wsl(config: &AppConfig, mut bundle: CacheBundle) -> CacheBun
     let started = Instant::now();
     match wsl_cat_many(&resolve_distro(config), &wanted) {
         Ok(found) => {
-            bundle.used_fallback = true;
+            bundle.used_fallback = !found.is_empty();
             log::info!(
                 "read_cache_bundle: {} of {} file(s) via one wsl.exe batch in {} ms",
                 found.len(),
@@ -1086,6 +1105,22 @@ mod tests {
             root.join(".config").join("goto-repo").join("history").exists(),
             "history belongs in the sibling .config dir"
         );
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn finder_dir_prefers_shell_finders_over_goto_repo() {
+        let root =
+            std::env::temp_dir().join(format!("repo-launcher-finder-test-{}", std::process::id()));
+        let legacy = root.join("legacy");
+        std::fs::create_dir_all(legacy.join("goto-repo")).unwrap();
+        assert_eq!(finder_dir(legacy.clone()), legacy.join("goto-repo"));
+
+        let current = root.join("current");
+        std::fs::create_dir_all(current.join("shell-finders")).unwrap();
+        std::fs::create_dir_all(current.join("goto-repo")).unwrap();
+        assert_eq!(finder_dir(current.clone()), current.join("shell-finders"));
 
         std::fs::remove_dir_all(&root).ok();
     }

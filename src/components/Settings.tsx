@@ -790,9 +790,7 @@ function DataTab({
             <p className="font-medium">Reading the cache through wsl.exe</p>
             <p className="mt-1">
               Windows can’t see these files over <code>\\wsl.localhost</code>, so each read runs a
-              WSL subprocess instead. Everything works — the popup just opens a little slower. This
-              usually means Windows is holding a stale view of the directory; a{" "}
-              <code>wsl --shutdown</code> clears it, but it closes every running WSL session first.
+              WSL subprocess instead. Everything works — the popup just opens a little slower.
             </p>
           </div>
         </div>
