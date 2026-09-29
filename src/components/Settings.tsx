@@ -555,6 +555,18 @@ function UpdatesTab({
   const restartApplies = build ? build.platform !== "windows" : true;
   const [check, setCheck] = useState<UpdateCheck | null>(null);
   const [checking, setChecking] = useState(false);
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const canInstall = build?.platform === "windows";
+
+  const runInstall = () => {
+    setInstalling(true);
+    setInstallError(null);
+    api
+      .installUpdate()
+      .catch((error) => setInstallError(String(error)))
+      .finally(() => setInstalling(false));
+  };
 
   const runCheck = () => {
     setChecking(true);
@@ -588,26 +600,42 @@ function UpdatesTab({
           >
             {checking ? "Checking…" : "Check for updates"}
           </button>
+          {check?.available && check.latest && canInstall && (
+            <button
+              type="button"
+              onClick={runInstall}
+              disabled={installing}
+              className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-60"
+            >
+              {installing ? "Downloading…" : `Update to v${check.latest}`}
+            </button>
+          )}
           {check?.available && check.latest && (
             <button
               type="button"
               onClick={() => void api.openUrl(check.release_url)}
-              className="rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
+              className="text-sm text-indigo-600 hover:underline dark:text-indigo-400"
             >
-              Download v{check.latest}
+              Release page
             </button>
           )}
         </div>
         <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-          {checking
-            ? "Asking GitHub for the newest release…"
-            : !check
-              ? "Not checked yet."
-              : check.error
-                ? `Couldn’t check: ${check.error}. The version you’re running may not be the newest.`
-                : check.available
-                  ? `v${check.latest} is available — you’re on v${check.current}. Downloading opens the release page; run the installer to update.`
-                  : `You’re on v${check.current}, the newest release.`}
+          {installError
+            ? `Update failed: ${installError}`
+            : installing
+              ? "Downloading the installer — the app closes, updates and reopens on its own."
+              : checking
+                ? "Asking GitHub for the newest release…"
+                : !check
+                  ? "Not checked yet."
+                  : check.error
+                    ? `Couldn’t check: ${check.error}. The version you’re running may not be the newest.`
+                    : check.available
+                      ? canInstall
+                        ? `v${check.latest} is available — you’re on v${check.current}. Updating closes the app, installs, and reopens it.`
+                        : `v${check.latest} is available — you’re on v${check.current}. Get the new build from the release page.`
+                      : `You’re on v${check.current}, the newest release.`}
         </p>
       </div>
       <Toggle

@@ -47,6 +47,9 @@ export const api = {
   /** Ask GitHub whether a newer release exists. */
   checkForUpdate: () => invoke<UpdateCheck>("check_for_update"),
 
+  /** Download the latest installer, run it, and exit; resolves only on failure. */
+  installUpdate: () => invoke<void>("install_update"),
+
   /** Open an http(s) URL in the default browser. */
   openUrl: (url: string) => invoke<void>("open_url", { url }),
 

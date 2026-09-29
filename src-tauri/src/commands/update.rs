@@ -191,6 +191,78 @@ pub async fn check_for_update() -> UpdateCheck {
         })
 }
 
+/// Download the latest release's NSIS installer and hand over to it. Runs it the
+/// way tauri-plugin-updater does — `/P` passive progress, `/UPDATE`, `/R` relaunch
+/// — because a bare `/S` install closes the app and never starts it again.
+#[cfg(target_os = "windows")]
+fn download_and_run_installer() -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(120))
+        .user_agent(concat!("repo-launcher/", env!("CARGO_PKG_VERSION")))
+        .build()
+        .map_err(|err| err.to_string())?;
+    let body = client
+        .get(format!("https://api.github.com/repos/{REPO_SLUG}/releases/latest"))
+        .send()
+        .and_then(|response| response.error_for_status())
+        .and_then(|response| response.text())
+        .map_err(|err| format!("Couldn’t read the latest release: {err}"))?;
+    let release: serde_json::Value = serde_json::from_str(&body).map_err(|err| err.to_string())?;
+    let asset = release
+        .get("assets")
+        .and_then(|assets| assets.as_array())
+        .and_then(|assets| {
+            assets.iter().find(|asset| {
+                asset
+                    .get("name")
+                    .and_then(|name| name.as_str())
+                    .is_some_and(|name| name.ends_with("_x64-setup.exe"))
+            })
+        })
+        .ok_or("The latest release has no Windows installer attached")?;
+    let name = asset["name"].as_str().unwrap_or("repo-launcher-setup.exe");
+    let url = asset
+        .get("browser_download_url")
+        .and_then(|url| url.as_str())
+        .ok_or("The installer has no download URL")?;
+
+    let bytes = client
+        .get(url)
+        .send()
+        .and_then(|response| response.error_for_status())
+        .and_then(|response| response.bytes())
+        .map_err(|err| format!("Download failed: {err}"))?;
+    let path = std::env::temp_dir().join(name);
+    std::fs::write(&path, &bytes).map_err(|err| format!("Couldn’t save the installer: {err}"))?;
+    log::info!("update: downloaded {} ({} bytes), launching", path.display(), bytes.len());
+
+    Command::new(&path)
+        .args(["/P", "/UPDATE", "/R"])
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .spawn()
+        .map_err(|err| format!("Couldn’t start the installer: {err}"))?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn download_and_run_installer() -> Result<(), String> {
+    Err("Updating in place is Windows-only; download the new build from the release page".into())
+}
+
+/// Install the latest release and exit, leaving the installer to replace the exe
+/// and relaunch it. Returns only on failure.
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(download_and_run_installer)
+        .await
+        .map_err(|err| err.to_string())??;
+    app.exit(0);
+    Ok(())
+}
+
 /// Delay before the first check, so it stays off the startup path.
 const UPDATE_CHECK_DELAY: Duration = Duration::from_secs(20);
 /// Gap between checks. This app is a tray launcher that runs for days, so a

@@ -241,6 +241,7 @@ fn main() {
             commands::repos::open_url,
             commands::repos::create_desktop_shortcut,
             commands::update::check_for_update,
+            commands::update::install_update,
             list_distros,
             open_settings,
             update_hotkey,
