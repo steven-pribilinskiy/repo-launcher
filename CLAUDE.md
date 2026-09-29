@@ -97,6 +97,8 @@ Rust command. `src/stores/repoStore.ts` (zustand) is the only state store. Ranki
   ```
 
   Say "pushed to main" or "released", never "shipped", until that tag exists.
+- **Installing a release by hand: run the NSIS installer with `/P /UPDATE /R`**, the flags the Updates-tab
+  button (`install_update`) uses. A bare `/S` closes the app and never relaunches it.
 - **Enter/Shift+Enter are ROLE-based, not hotkey-based** — they run whichever enabled action carries
   `role: "primary"` / `"alternative"`, resolved in both `useKeyboardNav.ts` and `ActionBar.tsx`. Change
   one and you must change the other, or the bar advertises a chord that runs something else. One known
