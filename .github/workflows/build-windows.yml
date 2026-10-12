@@ -39,9 +39,13 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # cache-bin off: with it on, the post step deletes every regular file that was in ~/.cargo/bin
+      # when the job started (getCargoBins/cleanBin) — rustup itself. Harmless on a throwaway hosted
+      # VM; on a self-hosted runner, whose home persists, it leaves every later job without rustup.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
+          cache-bin: "false"
 
       - run: npm ci
 
